@@ -180,7 +180,7 @@ elif modulo_principal == "📂 Directorio y Expedientes":
                 c2.write(f"**POSICION:** {info.get('POSICION', 'N/D')}")
                 c2.write(f"**APELLIDO:** {info.get('APELLIDO', 'N/D')}")
                 c2.write(f"**F.INGRESO:** {info.get('F.INGRESO', 'N/D')}")
-                c2.write(f"**EDAD:** {info.get('EDAD', 'N/D')}")
+                c2.write(f"**EDAD:** {info.get('EDAD', 'N/D')} años")
                 
                 c3.write(f"**PLACA METALICA:** {info.get('PLACA METALICA', 'N/D')}")
                 c3.write(f"**CEDULA:** {info.get('CEDULA', 'N/D')}")
@@ -260,7 +260,6 @@ elif modulo_principal == "➕ Registrar Nueva Unidad":
     with tab_dat:
         st.subheader("DATOS PERSONALES")
         
-        # Fila 1: RANGO | POSICION | PLACA METALICA
         c1, c2, c3 = st.columns(3)
         with c1:
             rango = st.text_input("RANGO", key="r_reg")
@@ -269,7 +268,6 @@ elif modulo_principal == "➕ Registrar Nueva Unidad":
         with c3:
             placa_metalica = st.text_input("PLACA METALICA", key="pm_reg")
 
-        # Fila 2: NOMBRE | APELLIDO | CEDULA
         c4, c5, c6 = st.columns(3)
         with c4:
             nombre = st.text_input("NOMBRE", key="n_reg")
@@ -278,42 +276,48 @@ elif modulo_principal == "➕ Registrar Nueva Unidad":
         with c6:
             cedula = st.text_input("CEDULA", key="c_reg")
 
-        # Fila 3: TROPA O CARRERA | F.INGRESO | A.SERVICIO (Con valor inicial explícito para sincronización perfecta)
         c7, c8, c9 = st.columns(3)
         with c7:
             tropa_carrera = st.text_input("TROPA O CARRERA", key="tc_reg")
         with c8:
-            f_ingreso = st.date_input("F.INGRESO", value=date(2015, 1, 1), min_value=date(1980, 1, 1), max_value=date.today(), key="fi_reg")
+            f_ingreso = st.date_input("F.INGRESO", value=None, min_value=date(1980, 1, 1), max_value=date.today(), key="fi_reg")
+            if f_ingreso:
+                hoy = date.today()
+                anos = hoy.year - f_ingreso.year
+                meses = hoy.month - f_ingreso.month
+                if meses < 0:
+                    anos -= 1
+                    meses += 12
+                if hoy.day < f_ingreso.day:
+                    meses -= 1
+                    if meses < 0:
+                        anos -= 1
+                        meses += 12
+                tiempo_servicio_str = f"{anos} años, {meses} meses"
+                st.metric("A.SERVICIO (Calculado)", tiempo_servicio_str)
+            else:
+                tiempo_servicio_str = "0 años, 0 meses"
+                st.info("📅 Seleccione F. Ingreso.")
         with c9:
-            hoy = date.today()
-            anos_s = hoy.year - f_ingreso.year
-            meses_s = hoy.month - f_ingreso.month
-            if meses_s < 0:
-                anos_s -= 1
-                meses_s += 12
-            if hoy.day < f_ingreso.day:
-                meses_s -= 1
-                if meses_s < 0:
-                    anos_s -= 1
-                    meses_s += 12
-            tiempo_servicio_str = f"{anos_s} años, {meses_s} meses"
-            st.text_input("A.SERVICIO", value=tiempo_servicio_str, disabled=True, key="as_reg_vis")
+            st.metric("A.SERVICIO (Visual)", tiempo_servicio_str)
 
-        # Fila 4: FECHA DE NACI. | EDAD (Con valor inicial explícito para sincronización perfecta) | T.SANGRE
         c10, c11, c12 = st.columns(3)
         with c10:
-            f_naci = st.date_input("FECHA DE NACI.", value=date(1990, 1, 1), min_value=date(1930, 1, 1), max_value=date.today(), key="fn_reg")
+            f_naci = st.date_input("FECHA DE NACI.", value=None, min_value=date(1930, 1, 1), max_value=date.today(), key="fn_reg")
+            if f_naci:
+                hoy = date.today()
+                edad_calc = hoy.year - f_naci.year - ((hoy.month, hoy.day) < (f_naci.month, f_naci.day))
+                st.metric("EDAD (Calculada)", f"{edad_calc} años")
+            else:
+                edad_calc = 0
+                st.info("📅 Seleccione F. Nacimiento.")
         with c11:
-            hoy = date.today()
-            edad_calc = hoy.year - f_naci.year - ((hoy.month, hoy.day) < (f_naci.month, f_naci.day))
-            edad_str = f"{edad_calc} años"
-            st.text_input("EDAD", value=edad_str, disabled=True, key="ed_reg_vis")
+            st.metric("EDAD (Visual)", f"{edad_calc} años")
         with c12:
             t_sangre = st.text_input("T.SANGRE", key="ts_reg")
 
-        # Fila 5: SEG. SOC.
-        c13, _, _ = st.columns(3)
-        with c13:
+        c10_s, _ = st.columns(2)
+        with c10_s:
             seg_soc = st.text_input("SEG. SOC.", key="ss_reg")
 
     with tab_lab:
@@ -368,7 +372,7 @@ elif modulo_principal == "➕ Registrar Nueva Unidad":
         with c6:
             barriada = st.text_input("BARRIADA", key="bar_reg")
 
-        c7, _, _ = st.columns(3)
+        c7, _ = st.columns(2)
         with c7:
             num_casa = st.text_input("NUMERO DE CASA", key="nc_reg")
 
@@ -383,7 +387,6 @@ elif modulo_principal == "➕ Registrar Nueva Unidad":
         with c3:
             especialidad = st.text_input("ESPECIALIDAD", key="esp_reg")
 
-        # Nº HIJOS-SEX_M | Nº HIJOS-SEX_F | Nº HIJOS (Total al lado)
         c4, c5, c6 = st.columns(3)
         with c4:
             n_hijos_m = st.number_input("Nº HIJOS-SEX_M", min_value=0, value=0, key="hm_reg")
@@ -391,7 +394,7 @@ elif modulo_principal == "➕ Registrar Nueva Unidad":
             n_hijos_f = st.number_input("Nº HIJOS-SEX_F", min_value=0, value=0, key="hf_reg")
         with c6:
             n_hijos = n_hijos_m + n_hijos_f
-            st.text_input("Nº HIJOS (Total)", value=str(n_hijos), disabled=True, key="nh_reg_vis")
+            st.metric("Nº HIJOS (Calculado)", n_hijos)
 
         c7, c8, c9 = st.columns(3)
         with c7:
@@ -401,18 +404,18 @@ elif modulo_principal == "➕ Registrar Nueva Unidad":
         with c9:
             caso_emergencia = st.text_input("CASO EMERGENCIA", key="ce_n_reg")
 
-        c10, _, _ = st.columns(3)
+        c10, _ = st.columns(2)
         with c10:
             telefono_emergencia = st.text_input("telefono (Emergencia)", key="te_reg")
 
         st.markdown("---")
         if st.button("💾 Guardar Nueva Unidad en el Sistema", type="primary"):
-            if nombre and apellido and cedula:
+            if nombre and apellido and cedula and f_naci and f_ingreso:
                 nuevo_registro = {
                     'RANGO': rango, 'POSICION': posicion, 'PLACA METALICA': placa_metalica,
                     'NOMBRE': nombre.upper(), 'APELLIDO': apellido.upper(), 'CEDULA': cedula,
                     'TROPA O CARRERA': tropa_carrera, 'F.INGRESO': str(f_ingreso), 'A.SERVICIO': tiempo_servicio_str,
-                    'FECHA DE NACI.': str(f_naci), 'EDAD': edad_str, 'T.SANGRE': t_sangre,
+                    'FECHA DE NACI.': str(f_naci), 'EDAD': edad_calc, 'T.SANGRE': t_sangre,
                     'GRUPO OPERT': grupo_opert, 'TIPO_SERV.': tipo_serv, 'FACCION': faccion,
                     'GRUPO': grupo, 'DEPARTAMENTO': departamento, 'OGD.DE TRASLADO': ogd_traslado,
                     'CENTRO OPERATIVO': centro_operativo, 'FUNCION': funcion, 'ESTADO/ACTIVIDAD': estado_actividad,
@@ -427,9 +430,9 @@ elif modulo_principal == "➕ Registrar Nueva Unidad":
                 
                 nuevo_df = pd.DataFrame([nuevo_registro])
                 st.session_state.df_personal = pd.concat([st.session_state.df_personal, nuevo_df], ignore_index=True)
-                st.success(f"¡Unidad {nombre.upper()} {apellido.upper()} registrada con éxito! (Edad: {edad_str} | Hijos: {n_hijos} | Años Serv.: {tiempo_servicio_str})")
+                st.success(f"¡Unidad {nombre.upper()} {apellido.upper()} registrada con éxito! (Edad: {edad_calc} | Hijos: {n_hijos} | Años Serv.: {tiempo_servicio_str})")
             else:
-                st.warning("⚠️ Por favor complete los campos obligatorios: Nombre, Apellido y Cédula.")
+                st.warning("⚠️ Por favor complete los campos obligatorios: Nombre, Apellido, Cédula, Fecha de Nacimiento y Fecha de Ingreso.")
 
 # ==============================================================================
 # MÓDULO 4: CONTROL DE NOVEDADES Y PERMISOS
@@ -450,8 +453,8 @@ elif modulo_principal == "📋 Control de Novedades y Permisos":
             tipo_n = st.selectbox("Tipo de Novedad", ["Incapacidad", "Vacaciones Tomadas", "Permiso Especial", "Licencia"])
             dias_n = st.number_input("Cantidad de Días", min_value=1, value=1)
         with c2:
-            f_ing_nov = st.date_input("Fecha de Inicio", date.today())
-            f_fin_nov = st.date_input("Fecha de Finalización", date.today())
+            f_ini = st.date_input("Fecha de Inicio", date.today())
+            f_fin = st.date_input("Fecha de Finalización", date.today())
             obs_n = st.text_area("Observaciones / Diagnóstico / Detalles")
             
         if st.form_submit_button("Registrar Novedad"):
