@@ -173,6 +173,7 @@ def pantalla_login():
 
     usuarios_permitidos = {
         "ADMINISTRADOR": "CONC505",
+        "LORENZO BOWEN": "10924",
         "MIRNA RIVERA": "20146",
         "ALISJHON": "199432",
         "ALBERTO AYALA": "24561",
