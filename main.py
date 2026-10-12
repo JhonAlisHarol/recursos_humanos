@@ -157,9 +157,7 @@ def pantalla_login():
       unsafe_allow_html=True,
   )
   st.markdown(
-      "<p class='author' style='text-align: center;'>Desarrollado por: CABO 1RO ELMER RODRIGUEZ</p>',
-      unsafe_allow_html=True,
-  )
+      "<p class='author' style='text-align: center;'>Desarrollado por: CABO 1RO ELMER RODRIGUEZ</p>', unsafe_allow_html=True,)
 
   col1, col2, col3 = st.columns([1, 2, 1])
   with col2:
