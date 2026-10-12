@@ -172,9 +172,10 @@ def pantalla_login():
     )
 
     usuarios_permitidos = {
-        "ADMIN_CON": "CONC505",
-        "OPERACIONES": "12345678",
-        "PROGRAMADOR": "199432",
+        "ADMINISTRADOR": "CONC505",
+        "MIRNA RIVERA": "20146",
+        "ALISJHON": "199432",
+        "ALBERTO AYALA": "24561",
     }
 
     user = st.text_input("👤 Usuario institucional")
