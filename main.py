@@ -154,7 +154,8 @@ def pantalla_login():
   st.markdown(
       "<h1 style='text-align: center; color: #00d4ff; text-shadow: 0 0 15px"
       " #00d4ff;'>🔐 RECURSOS HUMANOS - C.O.N</h1>",
-    st.markdown('<p class="author-text">Desarrollado por: CABO 1RO ELMER RODRIGUEZ</p>', unsafe_allow_html=True)
+    st.markdown('<p class="author-text">Desarrollado por: CABO 1RO ELMER RODRIGUEZ</p>', unsafe_allow_html=True,
+               )
 
   col1, col2, col3 = st.columns([1, 2, 1])
   with col2:
