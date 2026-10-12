@@ -157,8 +157,7 @@ def pantalla_login():
       unsafe_allow_html=True,
   )
   st.markdown(
-      "<p class='author' style='text-align: center;'>Desarrollado por: CABO 1RO ELMER RODRIGUEZ"
-      </p>",
+      "<p class='author' style='text-align: center;'>Desarrollado por: CABO 1RO ELMER RODRIGUEZ"</p>",
       unsafe_allow_html=True,
   )
 
