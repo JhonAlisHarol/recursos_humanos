@@ -163,14 +163,16 @@ def pantalla_login():
         unsafe_allow_html=True
     )
 
-  col1, col2, col3 = st.columns([1, 2, 1])
-  with col2:
-    st.markdown(
-        "<div style='background: rgba(10, 15, 25, 0.88); padding: 35px;"
-        " border-radius: 15px; border: 2px solid #00d4ff; box-shadow: 0 0 30px"
-        " rgba(0, 212, 255, 0.6);'>",
-        unsafe_allow_html=True,
-    )
+  # Asegúrate de que 'col1' esté alineado exactamente igual que el 'st.markdown' de arriba
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown(
+            "<div style='background: rgba(10, 15, 25, 0.88); padding: 35px;"
+            " border-radius: 15px; border: 2px solid #00d4ff; box-shadow: 0 0 30px"
+            " rgba(0, 212, 255, 0.6);'>",
+            unsafe_allow_html=True
+        )
 
     usuarios_permitidos = {
         "ADMINISTRADOR": "CONC505",
