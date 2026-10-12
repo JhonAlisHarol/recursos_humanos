@@ -176,6 +176,7 @@ def pantalla_login():
         "MIRNA RIVERA": "20146",
         "ALISJHON": "199432",
         "ALBERTO AYALA": "24561",
+        "DANILO SMITH": "49431",
     }
 
     user = st.text_input("👤 Usuario institucional")
