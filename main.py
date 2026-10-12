@@ -151,11 +151,17 @@ def obtener_indice(lista, valor):
 
 # --- 3. PANTALLA DE LOGIN CON ESTILO NEÓN ---
 def pantalla_login():
-  st.markdown(
-      "<h1 style='text-align: center; color: #00d4ff; text-shadow: 0 0 15px"
-      " #00d4ff;'>🔐 RECURSOS HUMANOS - C.O.N</h1>",
-    st.markdown('<p class="author-text">Desarrollado por: CABO 1RO ELMER RODRIGUEZ</p>', unsafe_allow_html=True,
-               )
+    # Primer markdown cerrado correctamente
+    st.markdown(
+        "<h1 style='text-align: center; color: #00d4ff; text-shadow: 0 0 15px #00d4ff;'>🔐 RECURSOS HUMANOS - C.O.N</h1>", 
+        unsafe_allow_html=True
+    )
+    
+    # Segundo markdown independiente
+    st.markdown(
+        '<p class="author-text">Desarrollado por: CABO 1RO ELMER RODRIGUEZ</p>', 
+        unsafe_allow_html=True
+    )
 
   col1, col2, col3 = st.columns([1, 2, 1])
   with col2:
