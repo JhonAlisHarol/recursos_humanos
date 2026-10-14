@@ -173,6 +173,7 @@ def pantalla_login():
             "ALISJHON": "199432",
             "ALBERTO AYALA": "24561",
             "DANILO SMITH": "49431",
+            "YANILKA RODRIGUEZ": "142012",
         }
 
         # Usamos st.form para que tome automáticamente el diseño "neon-card" de tu CSS sin dejar huecos
