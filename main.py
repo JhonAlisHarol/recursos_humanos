@@ -169,7 +169,6 @@ if "modo_pantalla" not in st.session_state:
 
 def obtener_indice(lista, valor):
     try:
-        # Intenta buscar convirtiendo todo a mayúsculas para evitar errores
         if isinstance(valor, str):
             return lista.index(valor.strip().upper())
         return lista.index(valor)
@@ -489,8 +488,7 @@ else:
                             st.info("Conectando con la base de datos principal...")
                             cliente_gs = conectar_google_sheets()
                             
-                            # ---> ¡REEMPLAZA ESTO POR EL ID DE TU GOOGLE SHEET! <---
-                            ID_HOJA = "PEGA_AQUI_EL_ID_DE_TU_HOJA" 
+                            ID_HOJA = "1m72l2gNb4_HWvz9PpIdw4ZyPDWr08TL8JUAyjcWccn0"
                             hoja_bd = cliente_gs.open_by_key(ID_HOJA).sheet1
                             hoja_bd.append_row(nueva_fila)
 
@@ -528,8 +526,7 @@ else:
             try:
                 # Conectar y buscar
                 cliente_gs = conectar_google_sheets()
-                # ---> ¡REEMPLAZA ESTO POR EL ID DE TU GOOGLE SHEET! <---
-                ID_HOJA = "PEGA_AQUI_EL_ID_DE_TU_HOJA" 
+                ID_HOJA = "1m72l2gNb4_HWvz9PpIdw4ZyPDWr08TL8JUAyjcWccn0"
                 hoja_bd = cliente_gs.open_by_key(ID_HOJA).sheet1
                 records = hoja_bd.get_all_records()
                 df_bd = pd.DataFrame(records)
