@@ -155,7 +155,6 @@ def conectar_google_sheets():
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
     ]
-    # Llama a las credenciales guardadas en st.secrets
     creds = Credentials.from_service_account_info(
         st.secrets["gcp_service_account"], scopes=scopes
     )
@@ -170,13 +169,33 @@ if "modo_pantalla" not in st.session_state:
 
 def obtener_indice(lista, valor):
     try:
+        # Intenta buscar convirtiendo todo a mayúsculas para evitar errores
+        if isinstance(valor, str):
+            return lista.index(valor.strip().upper())
         return lista.index(valor)
     except ValueError:
         return 0
 
+def parse_date(date_str, min_year):
+    try:
+        parsed = datetime.strptime(str(date_str).strip(), "%Y-%m-%d").date()
+        return parsed
+    except:
+        return datetime(min_year, 1, 1).date()
+
+def safe_int(value):
+    try:
+        return int(float(value))
+    except:
+        return 0
+
+def safe_str(value):
+    if pd.isna(value) or value is None:
+        return ""
+    return str(value).strip()
+
 # --- 3. PANTALLA DE LOGIN CON ESTILO NEÓN ---
 def pantalla_login():
-    # Título y desarrollador centrados y pegados
     st.markdown(
         """
         <div style='text-align: center; margin-bottom: 20px;'>
@@ -187,9 +206,7 @@ def pantalla_login():
         unsafe_allow_html=True
     )
 
-    # Las columnas centran el cuadro de login
     col1, col2, col3 = st.columns([1, 2, 1])
-    
     with col2:
         usuarios_permitidos = {
             "ADMINISTRADOR": "CONC505",
@@ -243,6 +260,10 @@ else:
         "SELECCIONAR", "PANAMÁ", "PANAMÁ OESTE", "COLÓN", "CHIRIQUÍ", "VERAGUAS",
         "COCLÉ", "HERRERA", "LOS SANTOS", "BOCAS DEL TORO", "DARIÉN",
     ]
+    lista_estados = ["SELECCIONAR", "ACTIVO", "INACTIVO", "VACACIONES", "PENSIONADO", "INCAPACITADO"]
+    lista_estado_civil = ["SELECCIONAR", "SOLTERO/A", "CASADO/A", "DIVORCIADO/A", "VIUDO/A"]
+    lista_si_no = ["NO", "SÍ"]
+    lista_select_si_no = ["SELECCIONAR", " SÍ", "NO"]
 
     # --- BARRA LATERAL (SIDEBAR) ---
     with st.sidebar:
@@ -302,75 +323,35 @@ else:
     # ==========================================
     if st.session_state.modo_pantalla == "DASHBOARD OPERATIVO":
         st.markdown(
-            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px"
-            " #00d4ff;'>📊 DASHBOARD OPERATIVO - CON</h1>",
+            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>📊 DASHBOARD OPERATIVO - CON</h1>",
             unsafe_allow_html=True,
         )
 
         col_dash1, col_dash2 = st.columns([2, 1])
 
         with col_dash1:
-            st.markdown(
-                "<h3 style='color: #00d4ff;'>🏢 Distribución por Centros y Estamentos</h3>",
-                unsafe_allow_html=True,
-            )
-            tabla_centros_estamentos = pd.DataFrame(
-                {
-                    "ESTAMENTO / CENTRO": [
-                        "CON", "CORCOL", "COMCH", "COMDA", "COMAR",
-                        "COMSAM", "COMCHEP", "CEVIBO", "TOTAL VERTICAL",
-                    ],
-                    "PNP": [0]*9,
-                    "SENAN": [0]*9,
-                    "SENAFRONT": [0]*9,
-                    "MINSEG": [0]*9,
-                    "MNJ": [0]*9,
-                    "TOTAL HORIZONTAL": [0]*9,
-                }
-            )
+            st.markdown("<h3 style='color: #00d4ff;'>🏢 Distribución por Centros y Estamentos</h3>", unsafe_allow_html=True)
+            tabla_centros_estamentos = pd.DataFrame({
+                "ESTAMENTO / CENTRO": ["CON", "CORCOL", "COMCH", "COMDA", "COMAR", "COMSAM", "COMCHEP", "CEVIBO", "TOTAL VERTICAL"],
+                "PNP": [0]*9, "SENAN": [0]*9, "SENAFRONT": [0]*9, "MINSEG": [0]*9, "MNJ": [0]*9, "TOTAL HORIZONTAL": [0]*9,
+            })
             st.dataframe(tabla_centros_estamentos, use_container_width=True)
 
         with col_dash2:
-            st.markdown(
-                "<h3 style='color: #00d4ff;'>⚡ Parte de Operatividad</h3>",
-                unsafe_allow_html=True,
-            )
-            tabla_operatividad = pd.DataFrame(
-                {
-                    "ESTATUS OPERATIVO": [
-                        "OPERATIVO", "NO OPERATIVO", "ORDENES A.COMP",
-                        "ORDENES DRP", "MNJ", "TOTAL",
-                    ],
-                    "CANTIDAD": [0]*6,
-                }
-            )
+            st.markdown("<h3 style='color: #00d4ff;'>⚡ Parte de Operatividad</h3>", unsafe_allow_html=True)
+            tabla_operatividad = pd.DataFrame({
+                "ESTATUS OPERATIVO": ["OPERATIVO", "NO OPERATIVO", "ORDENES A.COMP", "ORDENES DRP", "MNJ", "TOTAL"],
+                "CANTIDAD": [0]*6,
+            })
             st.dataframe(tabla_operatividad, use_container_width=True)
 
         st.markdown("---")
-        st.markdown(
-            "<h3 style='color: #00d4ff;'>🎖️ Total de Unidades por Rango y Centros</h3>",
-            unsafe_allow_html=True,
-        )
-        tabla_rangos_centros = pd.DataFrame(
-            {
-                "RANGO / CENTRO": [
-                    "COMISIONADO", "SUBCOMISIONADO", "MAYOR", "CAPITÁN",
-                    "TENIENTE", "SUBTENIENTE", "SARGENTO 1º", "SARGENTO 2º",
-                    "CABO 1º", "CABO 2º", "AGENTE", "MNJ", "TOTAL VERTICAL",
-                ],
-                "CON": [0]*13,
-                "CORCOL": [0]*13,
-                "COMCH": [0]*13,
-                "COMDA": [0]*13,
-                "COMAR": [0]*13,
-                "COMSAM": [0]*13,
-                "COMCHEP": [0]*13,
-                "CEVIBO": [0]*13,
-                "TOTAL HORIZONTAL": [0]*13,
-            }
-        )
+        st.markdown("<h3 style='color: #00d4ff;'>🎖️ Total de Unidades por Rango y Centros</h3>", unsafe_allow_html=True)
+        tabla_rangos_centros = pd.DataFrame({
+            "RANGO / CENTRO": ["COMISIONADO", "SUBCOMISIONADO", "MAYOR", "CAPITÁN", "TENIENTE", "SUBTENIENTE", "SARGENTO 1º", "SARGENTO 2º", "CABO 1º", "CABO 2º", "AGENTE", "MNJ", "TOTAL VERTICAL"],
+            "CON": [0]*13, "CORCOL": [0]*13, "COMCH": [0]*13, "COMDA": [0]*13, "COMAR": [0]*13, "COMSAM": [0]*13, "COMCHEP": [0]*13, "CEVIBO": [0]*13, "TOTAL HORIZONTAL": [0]*13,
+        })
         st.dataframe(tabla_rangos_centros, use_container_width=True)
-
 
     # ==========================================
     # OPCIÓN 2: NUEVO REGISTRO (CON PESTAÑAS Y GUARDADO FINAL)
@@ -381,22 +362,13 @@ else:
             unsafe_allow_html=True,
         )
 
-        # Inicia el formulario único para recoger los datos de todas las pestañas a la vez
         with st.form("form_nuevo_registro_excel", clear_on_submit=False):
-            
-            # --- CREACIÓN DE PESTAÑAS (TABS) PARA EL FORMULARIO ---
             tab1, tab2, tab3, tab4, tab5 = st.tabs([
-                "📋 1. DATOS PERSONALES", 
-                "📍 2. FUNCIONES GENERALES", 
-                "⚡ 3. OPERATIVIDAD", 
-                "🏡 4. RESIDENCIAL / ACADÉMICO", 
-                "🎽 5. TALLAS"
+                "📋 1. DATOS PERSONALES", "📍 2. FUNCIONES GENERALES", "⚡ 3. OPERATIVIDAD", "🏡 4. RESIDENCIAL / ACADÉMICO", "🎽 5. TALLAS"
             ])
 
-            # --- PESTAÑA 1: DATOS PERSONALES ---
             with tab1:
                 st.markdown("<h3 style='color: #00d4ff; margin-bottom: 20px;'>Información Personal</h3>", unsafe_allow_html=True)
-                
                 c1, c2, c3, c4, c5 = st.columns(5)
                 rango = c1.selectbox("RANGO", lista_rangos)
                 posic = c2.text_input("POSIC")
@@ -418,10 +390,8 @@ else:
                 fecha_ingreso = c14.date_input("FECHA DE INGRESO", min_value=datetime(1980, 1, 1), max_value=datetime.now(pytz.timezone('America/Panama')))
                 anos_servicios = c15.number_input("AÑOS DE SERVICIO", min_value=0, step=1)
 
-            # --- PESTAÑA 2: FUNCIONES GENERALES ---
             with tab2:
                 st.markdown("<h3 style='color: #00d4ff; margin-bottom: 20px;'>Funciones y Asignaciones</h3>", unsafe_allow_html=True)
-                
                 f1, f2, f3, f4, f5 = st.columns(5)
                 res_ogd = f1.text_input("RES. OGD. ASIG. AL CENTRO")
                 asig_trasl = f2.text_input("ASIG. TRASLADO")
@@ -434,15 +404,10 @@ else:
                 turno = f7.selectbox("TURNO", lista_turnos)
                 grupo = f8.text_input("GRUPO")
                 funcion = f9.text_input("FUNCIÓN")
-                estado_status = f10.selectbox(
-                    "ESTADO O STATUS",
-                    ["SELECCIONAR", "ACTIVO", "INACTIVO", "VACACIONES", "PENSIONADO", "INCAPACITADO"],
-                )
+                estado_status = f10.selectbox("ESTADO O STATUS", lista_estados)
 
-            # --- PESTAÑA 3: OPERATIVIDAD ---
             with tab3:
                 st.markdown("<h3 style='color: #00d4ff; margin-bottom: 20px;'>Tipo de Operatividad y Diagnóstico Médico</h3>", unsafe_allow_html=True)
-                
                 o1, o2, o3, o4, o5 = st.columns(5)
                 operat_no_operat = o1.selectbox("ESTATUS OPERAT.", ["SELECCIONAR", "OPERATIVO", "NO OPERATIVO"])
                 perm_temp = o2.selectbox("PERM./TEMP.", ["SELECCIONAR", "PERM", "TEMP"])
@@ -452,18 +417,16 @@ else:
 
                 o6, o7, o8, o9, o10 = st.columns(5)
                 observacion = o6.text_input("OBSERVACIÓN")
-                cert_buena_salud = o7.selectbox("CERT. BUENA SALUD ACT.", ["SELECCIONAR", " SÍ", "NO"])
+                cert_buena_salud = o7.selectbox("CERT. BUENA SALUD ACT.", lista_select_si_no)
                 fecha_diagnostico = o8.date_input("FECHA DIAGNÓSTICO")
                 f_prox_evaluacion = o9.date_input("F. PROX. EVALUACIÓN")
                 salud_ocupacional = o10.text_input("SALUD OCUPACIONAL")
 
                 o11, _ = st.columns([1, 4])
-                pensionado_opt = o11.selectbox("PENSIONADO", ["NO", "SÍ"])
+                pensionado_opt = o11.selectbox("PENSIONADO", lista_si_no)
 
-            # --- PESTAÑA 4: RESIDENCIAL ---
             with tab4:
                 st.markdown("<h3 style='color: #00d4ff; margin-bottom: 20px;'>Información Residencial, Familiar y Académica</h3>", unsafe_allow_html=True)
-                
                 r1, r2, r3, r4, r5 = st.columns(5)
                 provincia = r1.selectbox("PROVINCIA", lista_provincias)
                 distrito = r2.text_input("DISTRITO")
@@ -475,8 +438,8 @@ else:
                 nombre_familiar = r6.text_input("NOMBRE (EMERGENCIA)")
                 parentesco = r7.text_input("PARENTESCO")
                 telefono_familiar = r8.text_input("TELÉFONO (EMERGENCIA)")
-                estado_civil = r9.selectbox("ESTADO CIVIL", ["SELECCIONAR", "SOLTERO/A", "CASADO/A", "DIVORCIADO/A", "VIUDO/A"])
-                donante_sangre = r10.selectbox("DONANTE DE SANGRE", ["NO", "SÍ"])
+                estado_civil = r9.selectbox("ESTADO CIVIL", lista_estado_civil)
+                donante_sangre = r10.selectbox("DONANTE DE SANGRE", lista_si_no)
 
                 r11, r12, r13, r14, r15 = st.columns(5)
                 secundaria = r11.text_input("SECUNDARIA")
@@ -485,10 +448,8 @@ else:
                 hijas_f = r14.number_input("HIJAS F", min_value=0, step=1)
                 total_hijos = r15.number_input("TOTAL DE HIJOS", min_value=0, step=1)
 
-            # --- PESTAÑA 5: TALLAS Y GUARDADO FINAL ---
             with tab5:
                 st.markdown("<h3 style='color: #00d4ff; margin-bottom: 20px;'>Tallas de Uniforme y Equipamiento</h3>", unsafe_allow_html=True)
-                
                 t1, t2, t3, t4, t5 = st.columns(5)
                 talla_camisa = t1.text_input("CAMISA")
                 talla_pantalon = t2.text_input("PANTALÓN")
@@ -500,9 +461,6 @@ else:
                 talla_quepi = t6.text_input("QUÉPI")
                 talla_correa = t7.text_input("CORREA")
 
-                # ==============================================================
-                # BOTÓN DE GUARDADO COLOCADO ÚNICAMENTE AL FINAL DE LA PESTAÑA 5
-                # ==============================================================
                 st.markdown("<hr style='border:1px dashed #00d4ff; margin-top: 30px;'>", unsafe_allow_html=True)
                 st.info("⚠️ Revise que la información de las 4 pestañas anteriores esté completa antes de guardar el registro oficial.")
                 
@@ -513,12 +471,10 @@ else:
                         st.error("❌ Por favor complete los campos obligatorios principales de la Pestaña 1 (Rango, Nombre, Apellido y Cédula).")
                     else:
                         try:
-                            # 1. Capturar hora exacta de Panamá y usuario
                             tz = pytz.timezone('America/Panama')
                             timestamp = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
                             usuario_reg = st.session_state.get("usuario_actual", "DESCONOCIDO")
 
-                            # 2. Empaquetar TODOS los datos exactamente en el mismo orden de tus columnas de Excel
                             nueva_fila = [
                                 timestamp, usuario_reg, rango, posic, placa_metalica, nombre, apellido, cedula,
                                 str(fecha_naci), str(edad), genero, telefono_personal, estamento, num_promocion, descripcion_promo,
@@ -530,45 +486,219 @@ else:
                                 str(total_hijos), talla_camisa, talla_pantalon, talla_sueter, talla_botas, talla_zapatos, talla_quepi, talla_correa
                             ]
 
-                            # 3. Conectar y enviar a Google Sheets
                             st.info("Conectando con la base de datos principal...")
                             cliente_gs = conectar_google_sheets()
                             
                             # ---> ¡REEMPLAZA ESTO POR EL ID DE TU GOOGLE SHEET! <---
                             ID_HOJA = "PEGA_AQUI_EL_ID_DE_TU_HOJA" 
                             hoja_bd = cliente_gs.open_by_key(ID_HOJA).sheet1
-                            
                             hoja_bd.append_row(nueva_fila)
 
-                            st.success(
-                                f"✔️ El elemento {rango} {nombre} {apellido} con cédula {cedula}"
-                                " ha sido registrado exitosamente en la Base de Datos Institucional."
-                            )
+                            st.success(f"✔️ El elemento {rango} {nombre} {apellido} con cédula {cedula} ha sido registrado exitosamente.")
                         except Exception as e:
-                            st.error(f"❌ Ocurrió un error al intentar guardar en la base de datos: {e}")
+                            st.error(f"❌ Ocurrió un error al guardar en la base de datos: {e}")
 
     # ==========================================
-    # OPCIÓN 3: CONSULTA DE UNIDAD
+    # OPCIÓN 3: CONSULTA DE UNIDAD (MODO EDICIÓN COMPLETO SIN PESTAÑAS)
     # ==========================================
     elif st.session_state.modo_pantalla == "CONSULTA DE UNIDAD":
         st.markdown(
-            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>🔍 CONSULTA DE UNIDAD</h1>",
+            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>🔍 BÚSQUEDA Y EDICIÓN DE UNIDAD</h1>",
             unsafe_allow_html=True,
         )
         st.markdown(
-            "<p>Busque la información de un elemento ingresando su número de Cédula o Apellido.</p>",
+            "<p>Busque la información de un elemento ingresando <b>Nombre, Apellido, Cédula, Posición o Placa Metálica</b>.</p>",
             unsafe_allow_html=True,
         )
 
-        c_busq1, c_busq2 = st.columns([2, 1])
-        with c_busq1:
-            busqueda = st.text_input("Ingrese Cédula o Apellido a consultar:")
-        with c_busq2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            buscar_btn = st.button("Buscar Elemento", use_container_width=True)
+        with st.container():
+            c_busq1, c_busq2 = st.columns([3, 1])
+            with c_busq1:
+                busqueda = st.text_input("Término de búsqueda:")
+            with c_busq2:
+                st.markdown("<br>", unsafe_allow_html=True)
+                buscar_btn = st.button("Buscar Elemento", use_container_width=True)
 
         if buscar_btn and busqueda.strip():
-            st.info(f"Resultados de búsqueda para: **{busqueda}**")
+            st.session_state.termino_busqueda = busqueda.strip().lower()
+
+        if "termino_busqueda" in st.session_state and st.session_state.termino_busqueda:
+            term = st.session_state.termino_busqueda
+            
+            try:
+                # Conectar y buscar
+                cliente_gs = conectar_google_sheets()
+                # ---> ¡REEMPLAZA ESTO POR EL ID DE TU GOOGLE SHEET! <---
+                ID_HOJA = "PEGA_AQUI_EL_ID_DE_TU_HOJA" 
+                hoja_bd = cliente_gs.open_by_key(ID_HOJA).sheet1
+                records = hoja_bd.get_all_records()
+                df_bd = pd.DataFrame(records)
+                
+                if df_bd.empty:
+                    st.warning("La base de datos está vacía.")
+                else:
+                    # Filtro en múltiples columnas
+                    cols_to_search = ['CEDULA', 'APELLIDO', 'NOMBRE', 'POSIC', 'PLACA_METALICA']
+                    mask = pd.Series(False, index=df_bd.index)
+                    for col in cols_to_search:
+                        if col in df_bd.columns:
+                            mask = mask | df_bd[col].astype(str).str.lower().str.contains(term, na=False)
+                    
+                    resultados = df_bd[mask]
+                    
+                    if len(resultados) == 0:
+                        st.warning(f"No se encontraron registros que coincidan con '{term}'.")
+                    else:
+                        st.success(f"Se encontraron {len(resultados)} registro(s).")
+                        
+                        # Si hay varios, dejamos escoger
+                        opciones = ["SELECCIONAR UNIDAD..."] + resultados.apply(
+                            lambda row: f"{row.get('RANGO', '')} {row.get('NOMBRE', '')} {row.get('APELLIDO', '')} | Cédula: {row.get('CEDULA', '')}", axis=1
+                        ).tolist()
+                        
+                        seleccion = st.selectbox("Seleccione el registro que desea visualizar o editar:", opciones)
+
+                        if seleccion != "SELECCIONAR UNIDAD...":
+                            idx_dataframe = opciones.index(seleccion) - 1
+                            registro = resultados.iloc[idx_dataframe]
+                            
+                            # La fila real en Google Sheets es el índice del DataFrame + 2 (1 de cabecera y 1 porque Pandas es base 0)
+                            fila_google_sheets = registro.name + 2 
+
+                            st.markdown("---")
+                            st.markdown("<h2 style='text-align:center; color:#00ffaa;'>FICHA COMPLETA DEL ELEMENTO</h2>", unsafe_allow_html=True)
+                            
+                            # =================================================================
+                            # FORMULARIO GIGANTE DE EDICIÓN (SIN PESTAÑAS - TODO EN UNA VISTA)
+                            # =================================================================
+                            with st.form("form_edicion_completa", clear_on_submit=False):
+                                
+                                # SECCIÓN 1: DATOS PERSONALES
+                                st.markdown("<h3 style='color: #00d4ff; border-bottom: 1px solid #00d4ff; padding-bottom: 5px; margin-top:20px;'>📋 1. DATOS PERSONALES</h3>", unsafe_allow_html=True)
+                                c1, c2, c3, c4, c5 = st.columns(5)
+                                e_rango = c1.selectbox("RANGO", lista_rangos, index=obtener_indice(lista_rangos, registro.get("RANGO", "")))
+                                e_posic = c2.text_input("POSIC", value=safe_str(registro.get("POSIC", "")))
+                                e_placa_metalica = c3.text_input("Nº PLACA METÁLICA", value=safe_str(registro.get("PLACA_METALICA", "")))
+                                e_nombre = c4.text_input("NOMBRE", value=safe_str(registro.get("NOMBRE", "")))
+                                e_apellido = c5.text_input("APELLIDO", value=safe_str(registro.get("APELLIDO", "")))
+
+                                c6, c7, c8, c9, c10 = st.columns(5)
+                                e_cedula = c6.text_input("Nº CÉDULA", value=safe_str(registro.get("CEDULA", "")))
+                                e_fecha_naci = c7.date_input("FECHA DE NACIMIENTO", value=parse_date(registro.get("FECHA_NACIMIENTO", ""), 1950), min_value=datetime(1950, 1, 1))
+                                e_edad = c8.number_input("EDAD", min_value=0, step=1, value=safe_int(registro.get("EDAD", 0)))
+                                e_genero = c9.selectbox("GÉNERO", ["SELECCIONAR", "M", "F"], index=obtener_indice(["SELECCIONAR", "M", "F"], registro.get("GENERO", "")))
+                                e_telefono_personal = c10.text_input("TELÉFONO PERSONAL", value=safe_str(registro.get("TELEFONO_PERSONAL", "")))
+
+                                c11, c12, c13, c14, c15 = st.columns(5)
+                                e_estamento = c11.selectbox("ESTAMENTO", lista_estamentos, index=obtener_indice(lista_estamentos, registro.get("ESTAMENTO", "")))
+                                e_num_promocion = c12.text_input("Nº PROMOCIÓN", value=safe_str(registro.get("NUM_PROMOCION", "")))
+                                e_descripcion_promo = c13.text_input("DESCRIPCIÓN PROMOCIÓN", value=safe_str(registro.get("DESCRIPCION_PROMOCION", "")))
+                                e_fecha_ingreso = c14.date_input("FECHA DE INGRESO", value=parse_date(registro.get("FECHA_INGRESO", ""), 1980), min_value=datetime(1980, 1, 1))
+                                e_anos_servicios = c15.number_input("AÑOS DE SERVICIO", min_value=0, step=1, value=safe_int(registro.get("ANOS_SERVICIOS", 0)))
+
+                                # SECCIÓN 2: FUNCIONES GENERALES
+                                st.markdown("<h3 style='color: #00d4ff; border-bottom: 1px solid #00d4ff; padding-bottom: 5px; margin-top:30px;'>📍 2. FUNCIONES GENERALES</h3>", unsafe_allow_html=True)
+                                f1, f2, f3, f4, f5 = st.columns(5)
+                                e_res_ogd = f1.text_input("RES. OGD. ASIG. AL CENTRO", value=safe_str(registro.get("RES_OGD_ASIG", "")))
+                                e_asig_trasl = f2.text_input("ASIG. TRASLADO", value=safe_str(registro.get("ASIG_TRASLADO", "")))
+                                e_direc_depen = f3.text_input("DIREC, DEPEN O A. POLICIALES", value=safe_str(registro.get("DIREC_DEPEN", "")))
+                                e_asignado_centro = f4.text_input("ASIGNADO A (CENTRO)", value=safe_str(registro.get("ASIGNADO_CENTRO", "")))
+                                e_u_centro_asignado = f5.text_input("U. DEL CENTRO ASIGNADO", value=safe_str(registro.get("U_CENTRO_ASIGNADO", "")))
+
+                                f6, f7, f8, f9, f10 = st.columns(5)
+                                e_departamento = f6.selectbox("DEPARTAMENTO", lista_departamentos, index=obtener_indice(lista_departamentos, registro.get("DEPARTAMENTO", "")))
+                                e_turno = f7.selectbox("TURNO", lista_turnos, index=obtener_indice(lista_turnos, registro.get("TURNO", "")))
+                                e_grupo = f8.text_input("GRUPO", value=safe_str(registro.get("GRUPO", "")))
+                                e_funcion = f9.text_input("FUNCIÓN", value=safe_str(registro.get("FUNCION", "")))
+                                e_estado_status = f10.selectbox("ESTADO O STATUS", lista_estados, index=obtener_indice(lista_estados, registro.get("ESTADO_STATUS", "")))
+
+                                # SECCIÓN 3: OPERATIVIDAD
+                                st.markdown("<h3 style='color: #00d4ff; border-bottom: 1px solid #00d4ff; padding-bottom: 5px; margin-top:30px;'>⚡ 3. TIPO DE OPERATIVIDAD Y DIAGNÓSTICO MÉDICO</h3>", unsafe_allow_html=True)
+                                o1, o2, o3, o4, o5 = st.columns(5)
+                                e_operat_no_operat = o1.selectbox("ESTATUS OPERAT.", ["SELECCIONAR", "OPERATIVO", "NO OPERATIVO"], index=obtener_indice(["SELECCIONAR", "OPERATIVO", "NO OPERATIVO"], registro.get("OPERAT_NO_OPERAT", "")))
+                                e_perm_temp = o2.selectbox("PERM./TEMP.", ["SELECCIONAR", "PERM", "TEMP"], index=obtener_indice(["SELECCIONAR", "PERM", "TEMP"], registro.get("PERM_TEMP", "")))
+                                e_condicion = o3.text_input("CONDICIÓN", value=safe_str(registro.get("CONDICION", "")))
+                                e_apto_no_apto = o4.selectbox("APTO - NO APTO", ["SELECCIONAR", "APTO", "NO APTO"], index=obtener_indice(["SELECCIONAR", "APTO", "NO APTO"], registro.get("APTO_NO_APTO", "")))
+                                e_nivel_salud = o5.text_input("NIVEL", value=safe_str(registro.get("NIVEL_SALUD", "")))
+
+                                o6, o7, o8, o9, o10 = st.columns(5)
+                                e_observacion = o6.text_input("OBSERVACIÓN", value=safe_str(registro.get("OBSERVACION", "")))
+                                e_cert_buena_salud = o7.selectbox("CERT. BUENA SALUD ACT.", lista_select_si_no, index=obtener_indice(lista_select_si_no, registro.get("CERT_BUENA_SALUD", "")))
+                                e_fecha_diagnostico = o8.date_input("FECHA DIAGNÓSTICO", value=parse_date(registro.get("FECHA_DIAGNOSTICO", ""), 2000))
+                                e_f_prox_evaluacion = o9.date_input("F. PROX. EVALUACIÓN", value=parse_date(registro.get("F_PROX_EVALUACION", ""), 2000))
+                                e_salud_ocupacional = o10.text_input("SALUD OCUPACIONAL", value=safe_str(registro.get("SALUD_OCUPACIONAL", "")))
+
+                                o11, _ = st.columns([1, 4])
+                                e_pensionado_opt = o11.selectbox("PENSIONADO", lista_si_no, index=obtener_indice(lista_si_no, registro.get("PENSIONADO", "")))
+
+                                # SECCIÓN 4: RESIDENCIAL Y FAMILIAR
+                                st.markdown("<h3 style='color: #00d4ff; border-bottom: 1px solid #00d4ff; padding-bottom: 5px; margin-top:30px;'>🏡 4. INFORMACIÓN RESIDENCIAL, FAMILIAR Y ACADÉMICA</h3>", unsafe_allow_html=True)
+                                r1, r2, r3, r4, r5 = st.columns(5)
+                                e_provincia = r1.selectbox("PROVINCIA", lista_provincias, index=obtener_indice(lista_provincias, registro.get("PROVINCIA", "")))
+                                e_distrito = r2.text_input("DISTRITO", value=safe_str(registro.get("DISTRITO", "")))
+                                e_corregimiento = r3.text_input("CORREGIMIENTO", value=safe_str(registro.get("CORREGIMIENTO", "")))
+                                e_lugar = r4.text_input("LUGAR", value=safe_str(registro.get("LUGAR", "")))
+                                e_tipo_sangre = r5.selectbox("TIPO DE SANGRE", lista_sangre, index=obtener_indice(lista_sangre, registro.get("TIPO_SANGRE", "")))
+
+                                r6, r7, r8, r9, r10 = st.columns(5)
+                                e_nombre_familiar = r6.text_input("NOMBRE (EMERGENCIA)", value=safe_str(registro.get("NOMBRE_EMERGENCIA", "")))
+                                e_parentesco = r7.text_input("PARENTESCO", value=safe_str(registro.get("PARENTESCO", "")))
+                                e_telefono_familiar = r8.text_input("TELÉFONO (EMERGENCIA)", value=safe_str(registro.get("TELEFONO_EMERGENCIA", "")))
+                                e_estado_civil = r9.selectbox("ESTADO CIVIL", lista_estado_civil, index=obtener_indice(lista_estado_civil, registro.get("ESTADO_CIVIL", "")))
+                                e_donante_sangre = r10.selectbox("DONANTE DE SANGRE", lista_si_no, index=obtener_indice(lista_si_no, registro.get("DONANTE_SANGRE", "")))
+
+                                r11, r12, r13, r14, r15 = st.columns(5)
+                                e_secundaria = r11.text_input("SECUNDARIA", value=safe_str(registro.get("SECUNDARIA", "")))
+                                e_universidad = r12.text_input("UNIVERSIDAD", value=safe_str(registro.get("UNIVERSIDAD", "")))
+                                e_hijos_m = r13.number_input("HIJOS M", min_value=0, step=1, value=safe_int(registro.get("HIJOS_M", 0)))
+                                e_hijas_f = r14.number_input("HIJAS F", min_value=0, step=1, value=safe_int(registro.get("HIJAS_F", 0)))
+                                e_total_hijos = r15.number_input("TOTAL DE HIJOS", min_value=0, step=1, value=safe_int(registro.get("TOTAL_HIJOS", 0)))
+
+                                # SECCIÓN 5: TALLAS
+                                st.markdown("<h3 style='color: #00d4ff; border-bottom: 1px solid #00d4ff; padding-bottom: 5px; margin-top:30px;'>🎽 5. TALLAS DE UNIFORME Y EQUIPAMIENTO</h3>", unsafe_allow_html=True)
+                                t1, t2, t3, t4, t5 = st.columns(5)
+                                e_talla_camisa = t1.text_input("CAMISA", value=safe_str(registro.get("TALLA_CAMISA", "")))
+                                e_talla_pantalon = t2.text_input("PANTALÓN", value=safe_str(registro.get("TALLA_PANTALON", "")))
+                                e_talla_sueter = t3.text_input("SUÉTER", value=safe_str(registro.get("TALLA_SUETER", "")))
+                                e_talla_botas = t4.text_input("BOTAS", value=safe_str(registro.get("TALLA_BOTAS", "")))
+                                e_talla_zapatos = t5.text_input("ZAPATOS", value=safe_str(registro.get("TALLA_ZAPATOS", "")))
+
+                                t6, t7, t8 = st.columns([1, 1, 3])
+                                e_talla_quepi = t6.text_input("QUÉPI", value=safe_str(registro.get("TALLA_QUEPI", "")))
+                                e_talla_correa = t7.text_input("CORREA", value=safe_str(registro.get("TALLA_CORREA", "")))
+
+                                st.markdown("<hr style='border:1px dashed #00ffaa; margin-top: 30px;'>", unsafe_allow_html=True)
+                                
+                                btn_actualizar = st.form_submit_button("🔄 Guardar Cambios (Actualizar Fila en Base de Datos)", use_container_width=True)
+
+                                if btn_actualizar:
+                                    try:
+                                        # Recopilamos todos los datos igual que en nuevo registro, manteniendo timestamp original si es posible, o generando uno nuevo de edición.
+                                        fila_actualizada = [
+                                            str(registro.get("TIMESTAMP", datetime.now(pytz.timezone('America/Panama')).strftime("%Y-%m-%d %H:%M:%S"))), 
+                                            st.session_state.get("usuario_actual", "DESCONOCIDO") + " (Editó)", 
+                                            e_rango, e_posic, e_placa_metalica, e_nombre, e_apellido, e_cedula,
+                                            str(e_fecha_naci), str(e_edad), e_genero, e_telefono_personal, e_estamento, e_num_promocion, e_descripcion_promo,
+                                            str(e_fecha_ingreso), str(e_anos_servicios), e_res_ogd, e_asig_trasl, e_direc_depen, e_asignado_centro, e_u_centro_asignado,
+                                            e_departamento, e_turno, e_grupo, e_funcion, e_estado_status, e_operat_no_operat, e_perm_temp, e_condicion, e_apto_no_apto,
+                                            e_nivel_salud, e_observacion, e_cert_buena_salud, str(e_fecha_diagnostico), str(e_f_prox_evaluacion), e_salud_ocupacional,
+                                            e_pensionado_opt, e_provincia, e_distrito, e_corregimiento, e_lugar, e_tipo_sangre, e_nombre_familiar, e_parentesco,
+                                            e_telefono_familiar, e_estado_civil, e_donante_sangre, e_secundaria, e_universidad, str(e_hijos_m), str(e_hijas_f),
+                                            str(e_total_hijos), e_talla_camisa, e_talla_pantalon, e_talla_sueter, e_talla_botas, e_talla_zapatos, e_talla_quepi, e_talla_correa
+                                        ]
+
+                                        st.info(f"Actualizando registro en la fila {fila_google_sheets} de la Base de Datos...")
+                                        
+                                        # Enviar actualización a Google Sheets en el rango específico de esa fila
+                                        rango_a_actualizar = f"A{fila_google_sheets}:BH{fila_google_sheets}"
+                                        hoja_bd.update(values=[fila_actualizada], range_name=rango_a_actualizar)
+                                        
+                                        st.success(f"✔️ Registro de {e_nombre} {e_apellido} actualizado correctamente.")
+                                    except Exception as e:
+                                        st.error(f"❌ Ocurrió un error al actualizar: {e}")
+
+            except Exception as e:
+                st.error(f"Error al conectar con la base de datos o buscar: {e}")
 
     # ==========================================
     # OPCIÓN 4: REGISTRO DE INCAPACIDAD, PERMISO, ETC.
