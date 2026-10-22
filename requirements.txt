@@ -1,6 +1,5 @@
 streamlit
-pytz
 pandas
-plotly
-folium
-streamlit-folium
+gspread
+pytz
+google-auth
