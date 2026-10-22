@@ -1,11 +1,12 @@
-from datetime import date, datetime
-import base64
-import glob
-import folium
-import pandas as pd
-import pytz
 import streamlit as st
-from streamlit_folium import st_folium
+import pandas as pd
+import glob
+import base64
+import time
+from datetime import datetime
+import pytz
+import gspread
+from google.oauth2.service_account import Credentials
 
 # --- 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS NEÓN + VIDEO LOCAL DE FONDO ---
 st.set_page_config(
@@ -72,6 +73,19 @@ st.markdown(
         box-shadow: 0 0 25px rgba(0, 212, 255, 0.5);
     }}
 
+    /* Estilo para las Pestañas (Tabs) */
+    div[data-testid="stTabs"] button {{
+        color: #ffffff !important;
+        font-weight: bold;
+        font-size: 16px;
+    }}
+    div[data-testid="stTabs"] button[aria-selected="true"] {{
+        border-bottom-color: #00d4ff !important;
+        background-color: rgba(0, 212, 255, 0.15) !important;
+        color: #00d4ff !important;
+        text-shadow: 0 0 8px rgba(0, 212, 255, 0.8);
+    }}
+
     /* Estilo para Tablas */
     table {{
         width: 100%;
@@ -135,19 +149,30 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# --- CONEXIÓN A GOOGLE SHEETS ---
+@st.cache_resource
+def conectar_google_sheets():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+    ]
+    # Llama a las credenciales guardadas en st.secrets
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"], scopes=scopes
+    )
+    client = gspread.authorize(creds)
+    return client
+
 # --- 2. ESTADOS DE SESIÓN ---
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "modo_pantalla" not in st.session_state:
     st.session_state.modo_pantalla = "DASHBOARD OPERATIVO"
 
-
 def obtener_indice(lista, valor):
     try:
         return lista.index(valor)
     except ValueError:
         return 0
-
 
 # --- 3. PANTALLA DE LOGIN CON ESTILO NEÓN ---
 def pantalla_login():
@@ -176,12 +201,10 @@ def pantalla_login():
             "YANILKA RODRIGUEZ": "142012",
         }
 
-        # Usamos st.form para que tome automáticamente el diseño "neon-card" de tu CSS sin dejar huecos
         with st.form("login_form"):
             user = st.text_input("👤 Usuario institucional")
             password = st.text_input("🔑 Contraseña", type="password")
             
-            # El botón de inicio de sesión
             submitted = st.form_submit_button("Iniciar Sesión", use_container_width=True)
 
             if submitted:
@@ -205,55 +228,20 @@ else:
 
     # Listas maestras
     lista_rangos = [
-        "SELECCIONAR",
-        "COMISIONADO",
-        "SUBCOMISIONADO",
-        "MAYOR",
-        "CAPITÁN",
-        "TENIENTE",
-        "SUBTENIENTE",
-        "SARGENTO 1º",
-        "SARGENTO 2º",
-        "CABO 1º",
-        "CABO 2º",
-        "AGENTE",
-        "MNJ",
+        "SELECCIONAR", "COMISIONADO", "SUBCOMISIONADO", "MAYOR", "CAPITÁN",
+        "TENIENTE", "SUBTENIENTE", "SARGENTO 1º", "SARGENTO 2º", "CABO 1º",
+        "CABO 2º", "AGENTE", "MNJ",
     ]
     lista_estamentos = ["SELECCIONAR", "P.N", "SENAFRONT", "SENAN", "MINSEG", "MNJ"]
     lista_departamentos = [
-        "SELECCIONAR",
-        "DIRECCION",
-        "SUPERVISORA ADM",
-        "PLANEAMIENTO",
-        "COOR. TECNOLOGICO",
-        "OPERACIONES",
-        "ESTADISTICA",
-        "RECURSOS HUMANOS",
+        "SELECCIONAR", "DIRECCION", "SUPERVISORA ADM", "PLANEAMIENTO",
+        "COOR. TECNOLOGICO", "OPERACIONES", "ESTADISTICA", "RECURSOS HUMANOS",
     ]
     lista_turnos = ["SELECCIONAR", "5X2", "24X24", "ROTATIVO", "ADMINISTRATIVO"]
-    lista_sangre = [
-        "SELECCIONAR",
-        "A+",
-        "A-",
-        "B+",
-        "B-",
-        "AB+",
-        "AB-",
-        "O+",
-        "O-",
-    ]
+    lista_sangre = ["SELECCIONAR", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
     lista_provincias = [
-        "SELECCIONAR",
-        "PANAMÁ",
-        "PANAMÁ OESTE",
-        "COLÓN",
-        "CHIRIQUÍ",
-        "VERAGUAS",
-        "COCLÉ",
-        "HERRERA",
-        "LOS SANTOS",
-        "BOCAS DEL TORO",
-        "DARIÉN",
+        "SELECCIONAR", "PANAMÁ", "PANAMÁ OESTE", "COLÓN", "CHIRIQUÍ", "VERAGUAS",
+        "COCLÉ", "HERRERA", "LOS SANTOS", "BOCAS DEL TORO", "DARIÉN",
     ]
 
     # --- BARRA LATERAL (SIDEBAR) ---
@@ -323,29 +311,21 @@ else:
 
         with col_dash1:
             st.markdown(
-                "<h3 style='color: #00d4ff;'>🏢 Distribución por Centros y"
-                " Estamentos</h3>",
+                "<h3 style='color: #00d4ff;'>🏢 Distribución por Centros y Estamentos</h3>",
                 unsafe_allow_html=True,
             )
             tabla_centros_estamentos = pd.DataFrame(
                 {
                     "ESTAMENTO / CENTRO": [
-                        "CON",
-                        "CORCOL",
-                        "COMCH",
-                        "COMDA",
-                        "COMAR",
-                        "COMSAM",
-                        "COMCHEP",
-                        "CEVIBO",
-                        "TOTAL VERTICAL",
+                        "CON", "CORCOL", "COMCH", "COMDA", "COMAR",
+                        "COMSAM", "COMCHEP", "CEVIBO", "TOTAL VERTICAL",
                     ],
-                    "PNP": [0, 0, 0, 0, 0, 0, 0, 0, 0],
-                    "SENAN": [0, 0, 0, 0, 0, 0, 0, 0, 0],
-                    "SENAFRONT": [0, 0, 0, 0, 0, 0, 0, 0, 0],
-                    "MINSEG": [0, 0, 0, 0, 0, 0, 0, 0, 0],
-                    "MNJ": [0, 0, 0, 0, 0, 0, 0, 0, 0],
-                    "TOTAL HORIZONTAL": [0, 0, 0, 0, 0, 0, 0, 0, 0],
+                    "PNP": [0]*9,
+                    "SENAN": [0]*9,
+                    "SENAFRONT": [0]*9,
+                    "MINSEG": [0]*9,
+                    "MNJ": [0]*9,
+                    "TOTAL HORIZONTAL": [0]*9,
                 }
             )
             st.dataframe(tabla_centros_estamentos, use_container_width=True)
@@ -358,208 +338,225 @@ else:
             tabla_operatividad = pd.DataFrame(
                 {
                     "ESTATUS OPERATIVO": [
-                        "OPERATIVO",
-                        "NO OPERATIVO",
-                        "ORDENES A.COMP",
-                        "ORDENES DRP",
-                        "MNJ",
-                        "TOTAL",
+                        "OPERATIVO", "NO OPERATIVO", "ORDENES A.COMP",
+                        "ORDENES DRP", "MNJ", "TOTAL",
                     ],
-                    "CANTIDAD": [0, 0, 0, 0, 0, 0],
+                    "CANTIDAD": [0]*6,
                 }
             )
             st.dataframe(tabla_operatividad, use_container_width=True)
 
         st.markdown("---")
         st.markdown(
-            "<h3 style='color: #00d4ff;'>🎖️ Total de Unidades por Rango y"
-            " Centros</h3>",
+            "<h3 style='color: #00d4ff;'>🎖️ Total de Unidades por Rango y Centros</h3>",
             unsafe_allow_html=True,
         )
         tabla_rangos_centros = pd.DataFrame(
             {
                 "RANGO / CENTRO": [
-                    "COMISIONADO",
-                    "SUBCOMISIONADO",
-                    "MAYOR",
-                    "CAPITÁN",
-                    "TENIENTE",
-                    "SUBTENIENTE",
-                    "SARGENTO 1º",
-                    "SARGENTO 2º",
-                    "CABO 1º",
-                    "CABO 2º",
-                    "AGENTE",
-                    "MNJ",
-                    "TOTAL VERTICAL",
+                    "COMISIONADO", "SUBCOMISIONADO", "MAYOR", "CAPITÁN",
+                    "TENIENTE", "SUBTENIENTE", "SARGENTO 1º", "SARGENTO 2º",
+                    "CABO 1º", "CABO 2º", "AGENTE", "MNJ", "TOTAL VERTICAL",
                 ],
-                "CON": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                "CORCOL": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                "COMCH": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                "COMDA": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                "COMAR": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                "COMSAM": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                "COMCHEP": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                "CEVIBO": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                "TOTAL HORIZONTAL": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                "CON": [0]*13,
+                "CORCOL": [0]*13,
+                "COMCH": [0]*13,
+                "COMDA": [0]*13,
+                "COMAR": [0]*13,
+                "COMSAM": [0]*13,
+                "COMCHEP": [0]*13,
+                "CEVIBO": [0]*13,
+                "TOTAL HORIZONTAL": [0]*13,
             }
         )
         st.dataframe(tabla_rangos_centros, use_container_width=True)
 
+
     # ==========================================
-    # OPCIÓN 2: NUEVO REGISTRO (CONFIGURADO TAL CUAL LA BASE DE DATOS)
+    # OPCIÓN 2: NUEVO REGISTRO (CON PESTAÑAS Y GUARDADO FINAL)
     # ==========================================
     elif st.session_state.modo_pantalla == "NUEVO REGISTRO":
         st.markdown(
-            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px"
-            " #00d4ff;'>➕ NUEVO REGISTRO DE PERSONAL</h1>",
+            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>➕ NUEVO REGISTRO DE PERSONAL</h1>",
             unsafe_allow_html=True,
         )
 
+        # Inicia el formulario único para recoger los datos de todas las pestañas a la vez
         with st.form("form_nuevo_registro_excel", clear_on_submit=False):
+            
+            # --- CREACIÓN DE PESTAÑAS (TABS) PARA EL FORMULARIO ---
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "📋 1. DATOS PERSONALES", 
+                "📍 2. FUNCIONES GENERALES", 
+                "⚡ 3. OPERATIVIDAD", 
+                "🏡 4. RESIDENCIAL / ACADÉMICO", 
+                "🎽 5. TALLAS"
+            ])
 
-            # SECCIÓN 1: DATOS PERSONALES
-            st.subheader("📋 1. DATOS PERSONALES")
-            c1, c2, c3, c4, c5 = st.columns(5)
-            rango = c1.selectbox("RANGO", lista_rangos)
-            posic = c2.text_input("POSIC")
-            placa_metalica = c3.text_input("Nº PLACA METÁLICA")
-            nombre = c4.text_input("NOMBRE")
-            apellido = c5.text_input("APELLIDO")
+            # --- PESTAÑA 1: DATOS PERSONALES ---
+            with tab1:
+                st.markdown("<h3 style='color: #00d4ff; margin-bottom: 20px;'>Información Personal</h3>", unsafe_allow_html=True)
+                
+                c1, c2, c3, c4, c5 = st.columns(5)
+                rango = c1.selectbox("RANGO", lista_rangos)
+                posic = c2.text_input("POSIC")
+                placa_metalica = c3.text_input("Nº PLACA METÁLICA")
+                nombre = c4.text_input("NOMBRE")
+                apellido = c5.text_input("APELLIDO")
 
-            c6, c7, c8, c9, c10 = st.columns(5)
-            cedula = c6.text_input("Nº CÉDULA")
-            fecha_naci = c7.date_input("FECHA DE NACIMIENTO")
-            edad = c8.number_input("EDAD", min_value=0, step=1)
-            genero = c9.selectbox("GÉNERO", ["SELECCIONAR", "M", "F"])
-            telefono_personal = c10.text_input("TELÉFONO PERSONAL")
+                c6, c7, c8, c9, c10 = st.columns(5)
+                cedula = c6.text_input("Nº CÉDULA")
+                fecha_naci = c7.date_input("FECHA DE NACIMIENTO", min_value=datetime(1950, 1, 1), max_value=datetime.now(pytz.timezone('America/Panama')))
+                edad = c8.number_input("EDAD", min_value=0, step=1)
+                genero = c9.selectbox("GÉNERO", ["SELECCIONAR", "M", "F"])
+                telefono_personal = c10.text_input("TELÉFONO PERSONAL")
 
-            c11, c12, c13, c14, c15 = st.columns(5)
-            estamento = c11.selectbox("ESTAMENTO", lista_estamentos)
-            num_promocion = c12.text_input("Nº PROMOCIÓN")
-            descripcion_promo = c13.text_input("DESCRIPCIÓN PROMOCIÓN")
-            fecha_ingreso = c14.date_input("FECHA DE INGRESO")
-            anos_servicios = c15.number_input("AÑOS DE SERVICIOS", min_value=0, step=1)
+                c11, c12, c13, c14, c15 = st.columns(5)
+                estamento = c11.selectbox("ESTAMENTO", lista_estamentos)
+                num_promocion = c12.text_input("Nº PROMOCIÓN")
+                descripcion_promo = c13.text_input("DESCRIPCIÓN PROMOCIÓN")
+                fecha_ingreso = c14.date_input("FECHA DE INGRESO", min_value=datetime(1980, 1, 1), max_value=datetime.now(pytz.timezone('America/Panama')))
+                anos_servicios = c15.number_input("AÑOS DE SERVICIO", min_value=0, step=1)
 
-            # SECCIÓN 2: FUNCIONES GENERALES
-            st.subheader("📍 2. FUNCIONES GENERALES")
-            f1, f2, f3, f4, f5 = st.columns(5)
-            res_ogd = f1.text_input("RES. OGD. ASIG. AL CENTRO")
-            asig_trasl = f2.text_input("ASIG. TRASLADO")
-            direc_depen = f3.text_input("DIREC, DEPEN O A. POLICIALES")
-            asignado_centro = f4.text_input("ASIGNADO A (CENTRO)")
-            u_centro_asignado = f5.text_input("U. DEL CENTRO ASIGNADO")
+            # --- PESTAÑA 2: FUNCIONES GENERALES ---
+            with tab2:
+                st.markdown("<h3 style='color: #00d4ff; margin-bottom: 20px;'>Funciones y Asignaciones</h3>", unsafe_allow_html=True)
+                
+                f1, f2, f3, f4, f5 = st.columns(5)
+                res_ogd = f1.text_input("RES. OGD. ASIG. AL CENTRO")
+                asig_trasl = f2.text_input("ASIG. TRASLADO")
+                direc_depen = f3.text_input("DIREC, DEPEN O A. POLICIALES")
+                asignado_centro = f4.text_input("ASIGNADO A (CENTRO)")
+                u_centro_asignado = f5.text_input("U. DEL CENTRO ASIGNADO")
 
-            f6, f7, f8, f9, f10 = st.columns(5)
-            departamento = f6.selectbox("DEPARTAMENTO", lista_departamentos)
-            turno = f7.selectbox("TURNO", lista_turnos)
-            grupo = f8.text_input("GRUPO")
-            funcion = f9.text_input("FUNCIÓN")
-            estado_status = f10.selectbox(
-                "ESTADO O STATUS",
-                [
-                    "SELECCIONAR",
-                    "ACTIVO",
-                    "INACTIVO",
-                    "VACACIONES",
-                    "PENSIONADO",
-                    "INCAPACITADO",
-                ],
-            )
+                f6, f7, f8, f9, f10 = st.columns(5)
+                departamento = f6.selectbox("DEPARTAMENTO", lista_departamentos)
+                turno = f7.selectbox("TURNO", lista_turnos)
+                grupo = f8.text_input("GRUPO")
+                funcion = f9.text_input("FUNCIÓN")
+                estado_status = f10.selectbox(
+                    "ESTADO O STATUS",
+                    ["SELECCIONAR", "ACTIVO", "INACTIVO", "VACACIONES", "PENSIONADO", "INCAPACITADO"],
+                )
 
-            # SECCIÓN 3: TIPO DE OPERATIVIDAD Y DIAGNÓSTICO
-            st.subheader("⚡ 3. TIPO DE OPERATIVIDAD Y DIAGNÓSTICO")
-            o1, o2, o3, o4, o5 = st.columns(5)
-            operat_no_operat = o1.selectbox(
-                "OPERAT, NO OPERATIVO", ["SELECCIONAR", "OPERATIVO", "NO OPERATIVO"]
-            )
-            perm_temp = o2.selectbox("PERM./TEMP.", ["SELECCIONAR", "PERM", "TEMP"])
-            condicion = o3.text_input("CONDICIÓN")
-            apto_no_apto = o4.selectbox(
-                "APTO - NO APTO", ["SELECCIONAR", "APTO", "NO APTO"]
-            )
-            nivel_salud = o5.text_input("NIVEL")
+            # --- PESTAÑA 3: OPERATIVIDAD ---
+            with tab3:
+                st.markdown("<h3 style='color: #00d4ff; margin-bottom: 20px;'>Tipo de Operatividad y Diagnóstico Médico</h3>", unsafe_allow_html=True)
+                
+                o1, o2, o3, o4, o5 = st.columns(5)
+                operat_no_operat = o1.selectbox("ESTATUS OPERAT.", ["SELECCIONAR", "OPERATIVO", "NO OPERATIVO"])
+                perm_temp = o2.selectbox("PERM./TEMP.", ["SELECCIONAR", "PERM", "TEMP"])
+                condicion = o3.text_input("CONDICIÓN")
+                apto_no_apto = o4.selectbox("APTO - NO APTO", ["SELECCIONAR", "APTO", "NO APTO"])
+                nivel_salud = o5.text_input("NIVEL")
 
-            o6, o7, o8, o9, o10 = st.columns(5)
-            observacion = o6.text_input("OBSERVACIÓN")
-            cert_buena_salud = o7.selectbox(
-                "CERT. BUENA SALUD ACT.", ["SELECCIONAR", " SÍ", "NO"]
-            )
-            fecha_diagnostico = o8.date_input("FECHA DIAGNÓSTICO")
-            f_prox_evaluacion = o9.date_input("F. PROX. EVALUACIÓN")
-            salud_ocupacional = o10.text_input("SALUD OCUPACIONAL")
+                o6, o7, o8, o9, o10 = st.columns(5)
+                observacion = o6.text_input("OBSERVACIÓN")
+                cert_buena_salud = o7.selectbox("CERT. BUENA SALUD ACT.", ["SELECCIONAR", " SÍ", "NO"])
+                fecha_diagnostico = o8.date_input("FECHA DIAGNÓSTICO")
+                f_prox_evaluacion = o9.date_input("F. PROX. EVALUACIÓN")
+                salud_ocupacional = o10.text_input("SALUD OCUPACIONAL")
 
-            pensionado_opt = st.selectbox("PENSIONADO", ["NO", "SÍ"])
+                o11, _ = st.columns([1, 4])
+                pensionado_opt = o11.selectbox("PENSIONADO", ["NO", "SÍ"])
 
-            # SECCIÓN 4: INFORMACIÓN RESIDENCIAL, FAMILIAR Y ACADÉMICO
-            st.subheader("🏡 4. INFORMACIÓN RESIDENCIAL, FAMILIAR Y ACADÉMICO")
-            r1, r2, r3, r4, r5 = st.columns(5)
-            provincia = r1.selectbox("PROVINCIA", lista_provincias)
-            distrito = r2.text_input("DISTRITO")
-            corregimiento = r3.text_input("CORREGIMIENTO")
-            lugar = r4.text_input("LUGAR")
-            tipo_sangre = r5.selectbox("TIPO DE SANGRE", lista_sangre)
+            # --- PESTAÑA 4: RESIDENCIAL ---
+            with tab4:
+                st.markdown("<h3 style='color: #00d4ff; margin-bottom: 20px;'>Información Residencial, Familiar y Académica</h3>", unsafe_allow_html=True)
+                
+                r1, r2, r3, r4, r5 = st.columns(5)
+                provincia = r1.selectbox("PROVINCIA", lista_provincias)
+                distrito = r2.text_input("DISTRITO")
+                corregimiento = r3.text_input("CORREGIMIENTO")
+                lugar = r4.text_input("LUGAR")
+                tipo_sangre = r5.selectbox("TIPO DE SANGRE", lista_sangre)
 
-            r6, r7, r8, r9, r10 = st.columns(5)
-            nombre_familiar = r6.text_input("NOMBRE (EMERGENCIA)")
-            parentesco = r7.text_input("PARENTESCO")
-            telefono_familiar = r8.text_input("TELÉFONO (EMERGENCIA)")
-            estado_civil = r9.selectbox(
-                "ESTADO CIVIL",
-                ["SELECCIONAR", "SOLTERO/A", "CASADO/A", "DIVORCIADO/A", "VIUDO/A"],
-            )
-            donante_sangre = r10.selectbox("DONANTE DE SANGRE", ["NO", "SÍ"])
+                r6, r7, r8, r9, r10 = st.columns(5)
+                nombre_familiar = r6.text_input("NOMBRE (EMERGENCIA)")
+                parentesco = r7.text_input("PARENTESCO")
+                telefono_familiar = r8.text_input("TELÉFONO (EMERGENCIA)")
+                estado_civil = r9.selectbox("ESTADO CIVIL", ["SELECCIONAR", "SOLTERO/A", "CASADO/A", "DIVORCIADO/A", "VIUDO/A"])
+                donante_sangre = r10.selectbox("DONANTE DE SANGRE", ["NO", "SÍ"])
 
-            r11, r12, r13, r14, r15 = st.columns(5)
-            secundaria = r11.text_input("SECUNDARIA")
-            universidad = r12.text_input("UNIVERSIDAD")
-            hijos_m = r13.number_input("HIJOS M", min_value=0, step=1)
-            hijas_f = r14.number_input("HIJAS F", min_value=0, step=1)
-            total_hijos = r15.number_input("TOTAL DE HIJO", min_value=0, step=1)
+                r11, r12, r13, r14, r15 = st.columns(5)
+                secundaria = r11.text_input("SECUNDARIA")
+                universidad = r12.text_input("UNIVERSIDAD")
+                hijos_m = r13.number_input("HIJOS M", min_value=0, step=1)
+                hijas_f = r14.number_input("HIJAS F", min_value=0, step=1)
+                total_hijos = r15.number_input("TOTAL DE HIJOS", min_value=0, step=1)
 
-            # SECCIÓN 5: TALLAS DE UNIFORME Y OTROS
-            st.subheader("🎽 5. TALLAS DE UNIFORME Y OTROS")
-            t1, t2, t3, t4, t5 = st.columns(5)
-            talla_camisa = t1.text_input("CAMISA")
-            talla_pantalon = t2.text_input("PANTALÓN")
-            talla_sueter = t3.text_input("SUÉTER")
-            talla_botas = t4.text_input("BOTAS")
-            talla_zapatos = t5.text_input("ZAPATOS")
+            # --- PESTAÑA 5: TALLAS Y GUARDADO FINAL ---
+            with tab5:
+                st.markdown("<h3 style='color: #00d4ff; margin-bottom: 20px;'>Tallas de Uniforme y Equipamiento</h3>", unsafe_allow_html=True)
+                
+                t1, t2, t3, t4, t5 = st.columns(5)
+                talla_camisa = t1.text_input("CAMISA")
+                talla_pantalon = t2.text_input("PANTALÓN")
+                talla_sueter = t3.text_input("SUÉTER")
+                talla_botas = t4.text_input("BOTAS")
+                talla_zapatos = t5.text_input("ZAPATOS")
 
-            t6, t7 = st.columns(2)
-            talla_quepi = t6.text_input("QUÉPI")
-            talla_correa = t7.text_input("CORREA")
+                t6, t7, t8 = st.columns([1, 1, 3])
+                talla_quepi = t6.text_input("QUÉPI")
+                talla_correa = t7.text_input("CORREA")
 
-            st.divider()
-            submitted_excel = st.form_submit_button(
-                "Guardar Registro Oficial de Personal"
-            )
+                # ==============================================================
+                # BOTÓN DE GUARDADO COLOCADO ÚNICAMENTE AL FINAL DE LA PESTAÑA 5
+                # ==============================================================
+                st.markdown("<hr style='border:1px dashed #00d4ff; margin-top: 30px;'>", unsafe_allow_html=True)
+                st.info("⚠️ Revise que la información de las 4 pestañas anteriores esté completa antes de guardar el registro oficial.")
+                
+                submitted_excel = st.form_submit_button("💾 Guardar Registro Oficial de Personal", use_container_width=True)
 
-            if submitted_excel:
-                if not nombre or not apellido or not cedula or rango == "SELECCIONAR":
-                    st.error(
-                        "❌ Por favor complete los campos obligatorios principales"
-                        " (Rango, Nombre, Apellido y Cédula)."
-                    )
-                else:
-                    st.success(
-                        f"✔️ El elemento {rango} {nombre} {apellido} con cédula {cedula}"
-                        " ha sido registrado exitosamente con todos sus datos"
-                        " institucionales."
-                    )
+                if submitted_excel:
+                    if not nombre or not apellido or not cedula or rango == "SELECCIONAR":
+                        st.error("❌ Por favor complete los campos obligatorios principales de la Pestaña 1 (Rango, Nombre, Apellido y Cédula).")
+                    else:
+                        try:
+                            # 1. Capturar hora exacta de Panamá y usuario
+                            tz = pytz.timezone('America/Panama')
+                            timestamp = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+                            usuario_reg = st.session_state.get("usuario_actual", "DESCONOCIDO")
+
+                            # 2. Empaquetar TODOS los datos exactamente en el mismo orden de tus columnas de Excel
+                            nueva_fila = [
+                                timestamp, usuario_reg, rango, posic, placa_metalica, nombre, apellido, cedula,
+                                str(fecha_naci), str(edad), genero, telefono_personal, estamento, num_promocion, descripcion_promo,
+                                str(fecha_ingreso), str(anos_servicios), res_ogd, asig_trasl, direc_depen, asignado_centro, u_centro_asignado,
+                                departamento, turno, grupo, funcion, estado_status, operat_no_operat, perm_temp, condicion, apto_no_apto,
+                                nivel_salud, observacion, cert_buena_salud, str(fecha_diagnostico), str(f_prox_evaluacion), salud_ocupacional,
+                                pensionado_opt, provincia, distrito, corregimiento, lugar, tipo_sangre, nombre_familiar, parentesco,
+                                telefono_familiar, estado_civil, donante_sangre, secundaria, universidad, str(hijos_m), str(hijas_f),
+                                str(total_hijos), talla_camisa, talla_pantalon, talla_sueter, talla_botas, talla_zapatos, talla_quepi, talla_correa
+                            ]
+
+                            # 3. Conectar y enviar a Google Sheets
+                            st.info("Conectando con la base de datos principal...")
+                            cliente_gs = conectar_google_sheets()
+                            
+                            # ---> ¡REEMPLAZA ESTO POR EL ID DE TU GOOGLE SHEET! <---
+                            ID_HOJA = "PEGA_AQUI_EL_ID_DE_TU_HOJA" 
+                            hoja_bd = cliente_gs.open_by_key(ID_HOJA).sheet1
+                            
+                            hoja_bd.append_row(nueva_fila)
+
+                            st.success(
+                                f"✔️ El elemento {rango} {nombre} {apellido} con cédula {cedula}"
+                                " ha sido registrado exitosamente en la Base de Datos Institucional."
+                            )
+                        except Exception as e:
+                            st.error(f"❌ Ocurrió un error al intentar guardar en la base de datos: {e}")
 
     # ==========================================
     # OPCIÓN 3: CONSULTA DE UNIDAD
     # ==========================================
     elif st.session_state.modo_pantalla == "CONSULTA DE UNIDAD":
         st.markdown(
-            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px"
-            " #00d4ff;'>🔍 CONSULTA DE UNIDAD</h1>",
+            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>🔍 CONSULTA DE UNIDAD</h1>",
             unsafe_allow_html=True,
         )
         st.markdown(
-            "<p>Busque la información de un elemento ingresando su número de"
-            " Cédula o Apellido.</p>",
+            "<p>Busque la información de un elemento ingresando su número de Cédula o Apellido.</p>",
             unsafe_allow_html=True,
         )
 
@@ -578,8 +575,7 @@ else:
     # ==========================================
     elif st.session_state.modo_pantalla == "INCAPACIDAD_PERMISO":
         st.markdown(
-            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px"
-            " #00d4ff;'>📝 REGISTRO DE INCAPACIDADES Y PERMISOS</h1>",
+            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>📝 REGISTRO DE INCAPACIDADES Y PERMISOS</h1>",
             unsafe_allow_html=True,
         )
 
@@ -589,14 +585,7 @@ else:
             cedula_unidad = col_inc1.text_input("Cédula de la Unidad")
             tipo_novedad = col_inc2.selectbox(
                 "TIPO DE NOVEDAD",
-                [
-                    "SELECCIONAR",
-                    "INCAPACIDAD MÉDICA",
-                    "PERMISO PERSONAL",
-                    "VACACIONES",
-                    "LICENCIA",
-                    "SUSPENSIÓN",
-                ],
+                ["SELECCIONAR", "INCAPACIDAD MÉDICA", "PERMISO PERSONAL", "VACACIONES", "LICENCIA", "SUSPENSIÓN"],
             )
 
             col_inc3, col_inc4 = st.columns(2)
@@ -610,27 +599,20 @@ else:
 
             if btn_guardar_inc:
                 if tipo_novedad == "SELECCIONAR" or not cedula_unidad.strip():
-                    st.error(
-                        "❌ Debe ingresar la cédula y seleccionar el tipo de novedad."
-                    )
+                    st.error("❌ Debe ingresar la cédula y seleccionar el tipo de novedad.")
                 else:
-                    st.success(
-                        f"✔️ Novedad ({tipo_novedad}) registrada con éxito para la cédula"
-                        f" {cedula_unidad}."
-                    )
+                    st.success(f"✔️ Novedad ({tipo_novedad}) registrada con éxito para la cédula {cedula_unidad}.")
 
     # ==========================================
     # OPCIÓN 5: UNIDADES TRASLADADAS
     # ==========================================
     elif st.session_state.modo_pantalla == "UNIDADES_TRASLADADAS":
         st.markdown(
-            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px"
-            " #00d4ff;'>🔄 UNIDADES TRASLADADAS</h1>",
+            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>🔄 UNIDADES TRASLADADAS</h1>",
             unsafe_allow_html=True,
         )
         st.markdown(
-            "<p>Listado completo de unidades que registran movimientos, asignaciones"
-            " o traslados entre centros y dependencias.</p>",
+            "<p>Listado completo de unidades que registran movimientos, asignaciones o traslados entre centros y dependencias.</p>",
             unsafe_allow_html=True,
         )
 
@@ -648,7 +630,4 @@ else:
             }
         )
         st.dataframe(tabla_traslados, use_container_width=True)
-        st.info(
-            "ℹ️ Aquí se visualizarán todos los datos detallados de las unidades"
-            " trasladadas."
-        )
+        st.info("ℹ️ Aquí se visualizarán todos los datos detallados de las unidades trasladadas.")
