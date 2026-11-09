@@ -413,18 +413,12 @@ else:
                             ]
 
                             cliente_gs = conectar_google_sheets()
-                            
-                            # DIAGNÓSTICO EN VIVO: Verificar pestañas y conexión
-                            doc = cliente_gs.open_by_key(ID_HOJA)
-                            nombres_hojas = [w.title for w in doc.worksheets()]
-                            st.info(f"🔍 Pestañas detectadas en Google Sheets: {nombres_hojas}")
-
-                            hoja_bd = doc.worksheet("Plan de Recojo")
+                            hoja_bd = cliente_gs.open_by_key(ID_HOJA).worksheet("Plan_de_Recojo")
                             hoja_bd.append_row(nueva_fila)
 
                             st.success(f"✔️ El elemento {rango} {nombre} {apellido} con cédula {cedula} ha sido registrado exitosamente.")
                         except Exception as e:
-                            st.error(f"❌ ERROR DETALLADO DE GOOGLE: {e}")
+                            st.error(f"❌ Ocurrió un error al guardar en la base de datos: {e}")
 
     # ==========================================
     # OPCIÓN 2: CARGA MASIVA (PLAN DE RECOJO COMPLETO)
@@ -435,7 +429,7 @@ else:
             unsafe_allow_html=True,
         )
         st.markdown(
-            "<p>Sube tu archivo Excel con el formato horizontal del Plan de Recojo. El sistema procesará e inyectará todas las unidades de una sola vez a la pestaña <b>Plan de Recojo</b>.</p>",
+            "<p>Sube tu archivo Excel con el formato horizontal del Plan de Recojo. El sistema procesará e inyectará todas las unidades de una sola vez a la pestaña <b>Plan_de_Recojo</b>.</p>",
             unsafe_allow_html=True,
         )
 
@@ -528,7 +522,7 @@ else:
                             filas_a_insertar.append(fila_procesada)
 
                         cliente_gs = conectar_google_sheets()
-                        hoja_bd = cliente_gs.open_by_key(ID_HOJA).worksheet("Plan de Recojo")
+                        hoja_bd = cliente_gs.open_by_key(ID_HOJA).worksheet("Plan_de_Recojo")
                         hoja_bd.append_rows(filas_a_insertar)
 
                         st.success(f"🎉 ¡Plan de Recojo procesado con éxito! Se han registrado {len(filas_a_insertar)} unidades en el documento.")
