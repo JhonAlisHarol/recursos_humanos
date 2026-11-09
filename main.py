@@ -152,6 +152,7 @@ st.markdown(
 # --- CONEXIÓN A GOOGLE SHEETS ---
 @st.cache_resource
 def conectar_google_sheets():
+    st.write(f"Intentando conectar con ID: {ID_HOJA}") # <--- COLÓCALO AQUÍ
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
     ]
@@ -160,7 +161,6 @@ def conectar_google_sheets():
     )
     client = gspread.authorize(creds)
     return client
-
 # ID del nuevo documento Google Sheet "Plan_Recojo_CON"
 ID_HOJA = "10RXYbyOVD8UVwCDWv3btpj9ddLv5cacJRCAKes"
 
