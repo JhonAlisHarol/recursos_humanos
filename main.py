@@ -443,10 +443,11 @@ else:
 
         if archivo_subido is not None:
             try:
+                # AQUÍ ESTÁ LA CORRECCIÓN CLAVE: header=5
                 if archivo_subido.name.endswith('.csv'):
-                    df_subido = pd.read_csv(archivo_subido)
+                    df_subido = pd.read_csv(archivo_subido, header=5)
                 else:
-                    df_subido = pd.read_excel(archivo_subido)
+                    df_subido = pd.read_excel(archivo_subido, header=5)
 
                 st.success(f"✔️ Archivo leído con éxito. Se detectaron {len(df_subido)} registros para procesar.")
                 
