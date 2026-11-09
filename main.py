@@ -209,7 +209,6 @@ def pantalla_login():
                 else:
                     st.error("❌ Usuario o contraseña incorrectos")
 
-
 # --- 4. APLICACIÓN PRINCIPAL ---
 if not st.session_state.autenticado:
     pantalla_login()
@@ -404,8 +403,9 @@ else:
                             timestamp = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
                             usuario_reg = st.session_state.get("usuario_actual", "DESCONOCIDO")
 
+                            # Se añade un string vacío "" al inicio para respetar la columna A ("Nº") de tu Google Sheet
                             nueva_fila = [
-                                timestamp, usuario_reg, rango, posic, placa_metalica, nombre, apellido, cedula,
+                                "", timestamp, usuario_reg, rango, posic, placa_metalica, nombre, apellido, cedula,
                                 str(fecha_naci), str(edad), genero, telefono_personal, estamento, num_promocion, descripcion_promo,
                                 str(fecha_ingreso), str(anos_servicios), res_ogd, asig_trasl, direc_depen, asignado_centro, u_centro_asignado,
                                 departamento, turno, grupo, funcion, estado_status, operat_no_operat, perm_temp, condicion, apto_no_apto,
@@ -418,8 +418,8 @@ else:
                             st.info("Conectando con la base de datos principal (Plan_Recojo_CON)...")
                             cliente_gs = conectar_google_sheets()
                             
-                            hoja_bd = cliente_gs.open_by_key(ID_HOJA).sheet1
-                            # Usamos la fila 7 en adelante para insertar los registros nuevos (dejando filas 1-6 para títulos y cabeceras)
+                            # Nos conectamos a la pestaña "Plan de Recojo"
+                            hoja_bd = cliente_gs.open_by_key(ID_HOJA).worksheet("Plan de Recojo")
                             hoja_bd.append_row(nueva_fila)
 
                             st.success(f"✔️ El elemento {rango} {nombre} {apellido} con cédula {cedula} ha sido registrado exitosamente.")
@@ -435,7 +435,7 @@ else:
             unsafe_allow_html=True,
         )
         st.markdown(
-            "<p>Sube tu archivo Excel con el formato horizontal del Plan de Recojo. El sistema procesará e inyectará todas las unidades de una sola vez al documento <b>Plan_Recojo_CON</b>.</p>",
+            "<p>Sube tu archivo Excel con el formato horizontal del Plan de Recojo. El sistema procesará e inyectará todas las unidades de una sola vez a la pestaña <b>Plan de Recojo</b>.</p>",
             unsafe_allow_html=True,
         )
 
@@ -462,7 +462,9 @@ else:
                         filas_a_insertar = []
 
                         for _, row in df_subido.iterrows():
+                            # Se añade un string vacío "" al inicio para respetar la columna A ("Nº")
                             fila_procesada = [
+                                "",
                                 str(row.get("TIMESTAMP", timestamp_actual)),
                                 str(row.get("USUARIO_REGISTRO", usuario_reg + " (Masivo)")),
                                 str(row.get("RANGO", "")),
@@ -526,13 +528,13 @@ else:
                             ]
                             filas_a_insertar.append(fila_procesada)
 
-                        # Conexión y envío masivo a Google Sheets
+                        # Conexión y envío masivo a la pestaña "Plan de Recojo"
                         cliente_gs = conectar_google_sheets()
-                        hoja_bd = cliente_gs.open_by_key(ID_HOJA).sheet1
+                        hoja_bd = cliente_gs.open_by_key(ID_HOJA).worksheet("Plan de Recojo")
                         
                         hoja_bd.append_rows(filas_a_insertar)
 
-                        st.success(f"🎉 ¡Plan de Recojo procesado con éxito! Se han registrado {len(filas_a_insertar)} unidades en el documento 'Plan_Recojo_CON'.")
+                        st.success(f"🎉 ¡Plan de Recojo procesado con éxito! Se han registrado {len(filas_a_insertar)} unidades en el documento.")
 
             except Exception as e:
                 st.error(f"❌ Ocurrió un error al procesar el archivo o inyectarlo en Google Sheets: {e}")
