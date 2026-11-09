@@ -443,7 +443,7 @@ else:
 
         if archivo_subido is not None:
             try:
-                # Lectura de la carga masiva desde la fila de encabezados correcta (Fila 2 / índice 1)
+                # Lectura limpia indicando que los encabezados reales están en la Fila 2 (índice 1)
                 if archivo_subido.name.endswith('.csv'):
                     df_subido = pd.read_csv(archivo_subido, header=1)
                 else:
@@ -463,9 +463,9 @@ else:
                         filas_a_insertar = []
 
                         for _, row in df_subido.iterrows():
-                            # Mapeo exacto adaptado a las columnas de tu archivo Excel de carga masiva
+                            # Mapeo y orden exacto exigido por la base de datos Plan_Recojo_CON (61 columnas)
                             fila_procesada = [
-                                "", # Columna A (Nº - autoincremental en la hoja)
+                                "", # Columna A: Nº (autoincremental)
                                 str(row.get("TIMESTAMP", timestamp_actual)),
                                 str(row.get("USUARIO_REGISTRO", usuario_reg + " (Masivo)")),
                                 str(row.get("RANGO", "")),
@@ -509,7 +509,7 @@ else:
                                 str(row.get("CORREGIMIENTO", "")),
                                 str(row.get("LUGAR", "")),
                                 str(row.get("TIPO SANGRE", "")),
-                                str(row.get("NOMBRE", "")),  # Emergencia
+                                str(row.get("NOMBRE", "")), # Emergencia
                                 str(row.get("PARENTESCO", "")),
                                 str(row.get("TELEFONO", "")),
                                 str(row.get("ESTADO CIVIL", "")),
