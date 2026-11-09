@@ -389,7 +389,6 @@ else:
                 talla_correa = t7.text_input("CORREA")
 
                 st.markdown("<hr style='border:1px dashed #00d4ff; margin-top: 30px;'>", unsafe_allow_html=True)
-                st.info("⚠️ Revise que la información de las 4 pestañas anteriores esté completa antes de guardar el registro oficial.")
                 
                 submitted_excel = st.form_submit_button("💾 Guardar Registro Oficial de Personal", use_container_width=True)
 
@@ -494,7 +493,7 @@ else:
                                 str(row.get("OBSERVACIÓN", "")),
                                 str(row.get("CERTIFICADO DE BUENA SALUD ACTUALIZADO", "")),
                                 str(row.get("FECHA DIAGNOSTICO", "")),
-                                str(row.get("FEACHA DE PROX. EVALUACIÓN", "")),
+                                str(row.get("FECHA DE PROX. EVALUACIÓN", "")),
                                 str(row.get("SALUD OCUPACIONAL", "")),
                                 str(row.get("PENSIONADO", "")),
                                 str(row.get("PROVINCIA", "")),
