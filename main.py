@@ -413,12 +413,18 @@ else:
                             ]
 
                             cliente_gs = conectar_google_sheets()
-                            hoja_bd = cliente_gs.open_by_key(ID_HOJA).worksheet("Plan de Recojo")
+                            
+                            # DIAGNÓSTICO EN VIVO: Verificar pestañas y conexión
+                            doc = cliente_gs.open_by_key(ID_HOJA)
+                            nombres_hojas = [w.title for w in doc.worksheets()]
+                            st.info(f"🔍 Pestañas detectadas en Google Sheets: {nombres_hojas}")
+
+                            hoja_bd = doc.worksheet("Plan de Recojo")
                             hoja_bd.append_row(nueva_fila)
 
                             st.success(f"✔️ El elemento {rango} {nombre} {apellido} con cédula {cedula} ha sido registrado exitosamente.")
                         except Exception as e:
-                            st.error(f"❌ Ocurrió un error al guardar en la base de datos: {e}")
+                            st.error(f"❌ ERROR DETALLADO DE GOOGLE: {e}")
 
     # ==========================================
     # OPCIÓN 2: CARGA MASIVA (PLAN DE RECOJO COMPLETO)
