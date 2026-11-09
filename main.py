@@ -443,11 +443,11 @@ else:
 
         if archivo_subido is not None:
             try:
-                # AQUÍ ESTÁ LA CORRECCIÓN CLAVE: header=5
+                # Lectura indicando que los encabezados están en la Fila 2 (índice 1)
                 if archivo_subido.name.endswith('.csv'):
-                    df_subido = pd.read_csv(archivo_subido, header=5)
+                    df_subido = pd.read_csv(archivo_subido, header=1)
                 else:
-                    df_subido = pd.read_excel(archivo_subido, header=5)
+                    df_subido = pd.read_excel(archivo_subido, header=1)
 
                 st.success(f"✔️ Archivo leído con éxito. Se detectaron {len(df_subido)} registros para procesar.")
                 
@@ -463,69 +463,69 @@ else:
                         filas_a_insertar = []
 
                         for _, row in df_subido.iterrows():
-                            # Se añade un string vacío "" al inicio para respetar la columna A ("Nº")
+                            # Mapeo exacto adaptado a los nombres de columnas de tu archivo de carga
                             fila_procesada = [
-                                "",
+                                "", # Columna A: Nº
                                 str(row.get("TIMESTAMP", timestamp_actual)),
                                 str(row.get("USUARIO_REGISTRO", usuario_reg + " (Masivo)")),
                                 str(row.get("RANGO", "")),
                                 str(row.get("POSIC", "")),
-                                str(row.get("PLACA_METALICA", "")),
+                                str(row.get("Nº PLACA METALICA", "")),  # Mapeo correcto
                                 str(row.get("NOMBRE", "")),
                                 str(row.get("APELLIDO", "")),
-                                str(row.get("CEDULA", "")),
-                                str(row.get("FECHA_NACIMIENTO", "")),
+                                str(row.get("Nº CEDULA", "")),         # Mapeo correcto
+                                str(row.get("FECHA DE NACI.", "")),     # Mapeo correcto
                                 str(row.get("EDAD", "")),
                                 str(row.get("GENERO", "")),
-                                str(row.get("TELEFONO_PERSONAL", "")),
+                                str(row.get("Teléfono Personal", "")),  # Mapeo correcto
                                 str(row.get("ESTAMENTO", "")),
-                                str(row.get("NUM_PROMOCION", "")),
-                                str(row.get("DESCRIPCION_PROMOCION", "")),
-                                str(row.get("FECHA_INGRESO", "")),
+                                str(row.get("PROMOCIÓN", "")),          # Mapeo correcto
+                                str(row.get("DESCRIPCION", "")),
+                                str(row.get("FECHA DE INGRESO", "")),
                                 str(row.get("ANOS_SERVICIOS", "")),
-                                str(row.get("RES_OGD_ASIG", "")),
-                                str(row.get("ASIG_TRASLADO", "")),
-                                str(row.get("DIREC_DEPEN", "")),
-                                str(row.get("ASIGNADO_CENTRO", "")),
-                                str(row.get("U_CENTRO_ASIGNADO", "")),
+                                str(row.get("RESOLUCION/ OGD - ASIGANCIÓN AL CENTRO", "")),
+                                str(row.get("ASIGNADO / TRASLADO", "")),
+                                str(row.get("DIRECCION, DEPENDENCIA O AREAS POLICIALES ", "")),
+                                str(row.get("ASIGNADO A (CENTRO)", "")),
+                                str(row.get("UBICACIÓN DEL CENTRO ASIGNADO", "")),
                                 str(row.get("DEPARTAMENTO", "")),
-                                str(row.get("TURNO", "")),
+                                str(row.get("TRUNO", "")),
                                 str(row.get("GRUPO", "")),
-                                str(row.get("FUNCION", "")),
-                                str(row.get("ESTADO_STATUS", "")),
-                                str(row.get("OPERAT_NO_OPERAT", "")),
+                                str(row.get("FUNCIÓN", "")),
+                                str(row.get("ESTADO  O STATUS", "")),
+                                str(row.get("TIPO DE OPERATIVIDAD ", "")),
                                 str(row.get("PERM_TEMP", "")),
-                                str(row.get("CONDICION", "")),
-                                str(row.get("APTO_NO_APTO", "")),
-                                str(row.get("NIVEL_SALUD", "")),
-                                str(row.get("OBSERVACION", "")),
-                                str(row.get("CERT_BUENA_SALUD", "")),
-                                str(row.get("FECHA_DIAGNOSTICO", "")),
-                                str(row.get("F_PROX_EVALUACION", "")),
-                                str(row.get("SALUD_OCUPACIONAL", "")),
+                                str(row.get("CONDICIÓN", "")),
+                                str(row.get("APTO - NO APTO", "")),
+                                str(row.get("NIVEL", "")),
+                                str(row.get("OBSERVACIÓN", "")),
+                                str(row.get("CERTIFICADO DE BUENA SALUD ACTUALIZADO", "")),
+                                str(row.get("FECHA DIAGNOSTICO", "")),
+                                str(row.get("FECHA DE PROX. EVALUACIÓN", "")),
+                                str(row.get("SALUD OCUPACIONAL", "")),
                                 str(row.get("PENSIONADO", "")),
                                 str(row.get("PROVINCIA", "")),
                                 str(row.get("DISTRITO", "")),
                                 str(row.get("CORREGIMIENTO", "")),
                                 str(row.get("LUGAR", "")),
-                                str(row.get("TIPO_SANGRE", "")),
-                                str(row.get("NOMBRE_EMERGENCIA", "")),
+                                str(row.get("TIPO SANGRE", "")),
+                                str(row.get("NOMBRE", "")), # Emergencia
                                 str(row.get("PARENTESCO", "")),
-                                str(row.get("TELEFONO_EMERGENCIA", "")),
-                                str(row.get("ESTADO_CIVIL", "")),
-                                str(row.get("DONANTE_SANGRE", "")),
+                                str(row.get("TELEFONO", "")),
+                                str(row.get("ESTADO CIVIL", "")),
+                                str(row.get("DONANTE DE SANGRE", "")),
                                 str(row.get("SECUNDARIA", "")),
                                 str(row.get("UNIVERSIDAD", "")),
-                                str(row.get("HIJOS_M", "")),
-                                str(row.get("HIJAS_F", "")),
+                                str(row.get("M", "")),
+                                str(row.get("F", "")),
                                 str(row.get("TOTAL_HIJOS", "")),
-                                str(row.get("TALLA_CAMISA", "")),
-                                str(row.get("TALLA_PANTALON", "")),
-                                str(row.get("TALLA_SUETER", "")),
-                                str(row.get("TALLA_BOTAS", "")),
-                                str(row.get("TALLA_ZAPATOS", "")),
-                                str(row.get("TALLA_QUEPI", "")),
-                                str(row.get("TALLA_CORREA", ""))
+                                str(row.get("CAMISA", "")),
+                                str(row.get("PANTALON", "")),
+                                str(row.get("SUETER", "")),
+                                str(row.get("BOTAS", "")),
+                                str(row.get("ZAPATOS", "")),
+                                str(row.get("QUEPI", "")),
+                                str(row.get("CORREA", ""))
                             ]
                             filas_a_insertar.append(fila_procesada)
 
