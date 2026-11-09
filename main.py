@@ -149,7 +149,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --- CONFIGURACIÓN DE GOOGLE SHEETS ---
+# --- CONEXIÓN A GOOGLE SHEETS ---
 ID_HOJA = "10RXYbyOVD8UVwCDWv3btpj9ddLv5cacJRCAKes"
 
 @st.cache_resource
@@ -162,14 +162,6 @@ def conectar_google_sheets():
         st.secrets["gcp_service_account"], scopes=scopes
     )
     return gspread.authorize(creds)
-
-# Inicialización segura de la hoja de Google Sheets
-try:
-    gc = conectar_google_sheets()
-    hoja_excel = gc.open_by_key(ID_HOJA).worksheet("Plan de Recojo")
-except Exception as e:
-    st.error(f"🚨 ERROR DE CONEXIÓN CON GOOGLE SHEETS: {e}")
-    hoja_excel = None
 
 # --- 2. ESTADOS DE SESIÓN ---
 if "autenticado" not in st.session_state:
@@ -404,8 +396,6 @@ else:
                 if submitted_excel:
                     if not nombre or not apellido or not cedula or rango == "SELECCIONAR":
                         st.error("❌ Por favor complete los campos obligatorios principales de la Pestaña 1 (Rango, Nombre, Apellido y Cédula).")
-                    elif hoja_excel is None:
-                        st.error("❌ No hay conexión activa con Google Sheets.")
                     else:
                         try:
                             tz = pytz.timezone('America/Panama')
@@ -423,7 +413,10 @@ else:
                                 str(total_hijos), talla_camisa, talla_pantalon, talla_sueter, talla_botas, talla_zapatos, talla_quepi, talla_correa
                             ]
 
-                            hoja_excel.append_row(nueva_fila)
+                            cliente_gs = conectar_google_sheets()
+                            hoja_bd = cliente_gs.open_by_key(ID_HOJA).worksheet("Plan de Recojo")
+                            hoja_bd.append_row(nueva_fila)
+
                             st.success(f"✔️ El elemento {rango} {nombre} {apellido} con cédula {cedula} ha sido registrado exitosamente.")
                         except Exception as e:
                             st.error(f"❌ Ocurrió un error al guardar en la base de datos: {e}")
@@ -456,84 +449,84 @@ else:
                 st.dataframe(df_subido.head(), use_container_width=True)
 
                 if st.button("🚀 Inyectar Plan de Recojo a Google Sheets", use_container_width=True):
-                    if hoja_excel is None:
-                        st.error("❌ No hay conexión activa con Google Sheets.")
-                    else:
-                        with st.spinner("Subiendo registros masivamente a Google Sheets..."):
-                            tz = pytz.timezone('America/Panama')
-                            timestamp_actual = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
-                            usuario_reg = st.session_state.get("usuario_actual", "ADMINISTRADOR")
+                    with st.spinner("Subiendo registros masivamente a Google Sheets..."):
+                        tz = pytz.timezone('America/Panama')
+                        timestamp_actual = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+                        usuario_reg = st.session_state.get("usuario_actual", "ADMINISTRADOR")
 
-                            filas_a_insertar = []
+                        filas_a_insertar = []
 
-                            for _, row in df_subido.iterrows():
-                                fila_procesada = [
-                                    "", 
-                                    str(row.get("TIMESTAMP", timestamp_actual)),
-                                    str(row.get("USUARIO_REGISTRO", usuario_reg + " (Masivo)")),
-                                    str(row.get("RANGO", "")),
-                                    str(row.get("POSIC", "")),
-                                    str(row.get("Nº PLACA METALICA", "")),
-                                    str(row.get("NOMBRE", "")),
-                                    str(row.get("APELLIDO", "")),
-                                    str(row.get("Nº CEDULA", "")),
-                                    str(row.get("FECHA DE NACI.", "")),
-                                    str(row.get("EDAD", "")),
-                                    str(row.get("GENERO", "")),
-                                    str(row.get("Teléfono Personal", "")),
-                                    str(row.get("ESTAMENTO", "")),
-                                    str(row.get("PROMOCIÓN", "")),
-                                    str(row.get("DESCRIPCION", "")),
-                                    str(row.get("FECHA DE INGRESO", "")),
-                                    str(row.get("ANOS_SERVICIOS", "")),
-                                    str(row.get("RESOLUCION/ OGD - ASIGANCIÓN AL CENTRO", "")),
-                                    str(row.get("ASIGNADO / TRASLADO", "")),
-                                    str(row.get("DIRECCION, DEPENDENCIA O AREAS POLICIALES ", "")),
-                                    str(row.get("ASIGNADO A (CENTRO)", "")),
-                                    str(row.get("UBICACIÓN DEL CENTRO ASIGNADO", "")),
-                                    str(row.get("DEPARTAMENTO", "")),
-                                    str(row.get("TRUNO", "")),
-                                    str(row.get("GRUPO", "")),
-                                    str(row.get("FUNCIÓN", "")),
-                                    str(row.get("ESTADO  O STATUS", "")),
-                                    str(row.get("TIPO DE OPERATIVIDAD ", "")),
-                                    str(row.get("PERM_TEMP", "")),
-                                    str(row.get("CONDICIÓN", "")),
-                                    str(row.get("APTO - NO APTO", "")),
-                                    str(row.get("NIVEL", "")),
-                                    str(row.get("OBSERVACIÓN", "")),
-                                    str(row.get("CERTIFICADO DE BUENA SALUD ACTUALIZADO", "")),
-                                    str(row.get("FECHA DIAGNOSTICO", "")),
-                                    str(row.get("FECHA DE PROX. EVALUACIÓN", "")),
-                                    str(row.get("SALUD OCUPACIONAL", "")),
-                                    str(row.get("PENSIONADO", "")),
-                                    str(row.get("PROVINCIA", "")),
-                                    str(row.get("DISTRITO", "")),
-                                    str(row.get("CORREGIMIENTO", "")),
-                                    str(row.get("LUGAR", "")),
-                                    str(row.get("TIPO SANGRE", "")),
-                                    str(row.get("NOMBRE", "")), 
-                                    str(row.get("PARENTESCO", "")),
-                                    str(row.get("TELEFONO", "")),
-                                    str(row.get("ESTADO CIVIL", "")),
-                                    str(row.get("DONANTE_SANGRE", "")),
-                                    str(row.get("SECUNDARIA", "")),
-                                    str(row.get("UNIVERSIDAD", "")),
-                                    str(row.get("M", "")),
-                                    str(row.get("F", "")),
-                                    str(row.get("TOTAL_HIJOS", "")),
-                                    str(row.get("CAMISA", "")),
-                                    str(row.get("PANTALON", "")),
-                                    str(row.get("SUETER", "")),
-                                    str(row.get("BOTAS", "")),
-                                    str(row.get("ZAPATOS", "")),
-                                    str(row.get("QUEPI", "")),
-                                    str(row.get("CORREA", ""))
-                                ]
-                                filas_a_insertar.append(fila_procesada)
+                        for _, row in df_subido.iterrows():
+                            fila_procesada = [
+                                "", 
+                                str(row.get("TIMESTAMP", timestamp_actual)),
+                                str(row.get("USUARIO_REGISTRO", usuario_reg + " (Masivo)")),
+                                str(row.get("RANGO", "")),
+                                str(row.get("POSIC", "")),
+                                str(row.get("Nº PLACA METALICA", "")),
+                                str(row.get("NOMBRE", "")),
+                                str(row.get("APELLIDO", "")),
+                                str(row.get("Nº CEDULA", "")),
+                                str(row.get("FECHA DE NACI.", "")),
+                                str(row.get("EDAD", "")),
+                                str(row.get("GENERO", "")),
+                                str(row.get("Teléfono Personal", "")),
+                                str(row.get("ESTAMENTO", "")),
+                                str(row.get("PROMOCIÓN", "")),
+                                str(row.get("DESCRIPCION", "")),
+                                str(row.get("FECHA DE INGRESO", "")),
+                                str(row.get("ANOS_SERVICIOS", "")),
+                                str(row.get("RESOLUCION/ OGD - ASIGANCIÓN AL CENTRO", "")),
+                                str(row.get("ASIGNADO / TRASLADO", "")),
+                                str(row.get("DIRECCION, DEPENDENCIA O AREAS POLICIALES ", "")),
+                                str(row.get("ASIGNADO A (CENTRO)", "")),
+                                str(row.get("UBICACIÓN DEL CENTRO ASIGNADO", "")),
+                                str(row.get("DEPARTAMENTO", "")),
+                                str(row.get("TRUNO", "")),
+                                str(row.get("GRUPO", "")),
+                                str(row.get("FUNCIÓN", "")),
+                                str(row.get("ESTADO  O STATUS", "")),
+                                str(row.get("TIPO DE OPERATIVIDAD ", "")),
+                                str(row.get("PERM_TEMP", "")),
+                                str(row.get("CONDICIÓN", "")),
+                                str(row.get("APTO - NO APTO", "")),
+                                str(row.get("NIVEL", "")),
+                                str(row.get("OBSERVACIÓN", "")),
+                                str(row.get("CERTIFICADO DE BUENA SALUD ACTUALIZADO", "")),
+                                str(row.get("FECHA DIAGNOSTICO", "")),
+                                str(row.get("FEACHA DE PROX. EVALUACIÓN", "")),
+                                str(row.get("SALUD OCUPACIONAL", "")),
+                                str(row.get("PENSIONADO", "")),
+                                str(row.get("PROVINCIA", "")),
+                                str(row.get("DISTRITO", "")),
+                                str(row.get("CORREGIMIENTO", "")),
+                                str(row.get("LUGAR", "")),
+                                str(row.get("TIPO SANGRE", "")),
+                                str(row.get("NOMBRE", "")), 
+                                str(row.get("PARENTESCO", "")),
+                                str(row.get("TELEFONO", "")),
+                                str(row.get("ESTADO CIVIL", "")),
+                                str(row.get("DONANTE DE SANGRE", "")),
+                                str(row.get("SECUNDARIA", "")),
+                                str(row.get("UNIVERSIDAD", "")),
+                                str(row.get("M", "")),
+                                str(row.get("F", "")),
+                                str(row.get("TOTAL_HIJOS", "")),
+                                str(row.get("CAMISA", "")),
+                                str(row.get("PANTALON", "")),
+                                str(row.get("SUETER", "")),
+                                str(row.get("BOTAS", "")),
+                                str(row.get("ZAPATOS", "")),
+                                str(row.get("QUEPI", "")),
+                                str(row.get("CORREA", ""))
+                            ]
+                            filas_a_insertar.append(fila_procesada)
 
-                            hoja_excel.append_rows(filas_a_insertar)
-                            st.success(f"🎉 ¡Plan de Recojo procesado con éxito! Se han registrado {len(filas_a_insertar)} unidades en el documento.")
+                        cliente_gs = conectar_google_sheets()
+                        hoja_bd = cliente_gs.open_by_key(ID_HOJA).worksheet("Plan de Recojo")
+                        hoja_bd.append_rows(filas_a_insertar)
+
+                        st.success(f"🎉 ¡Plan de Recojo procesado con éxito! Se han registrado {len(filas_a_insertar)} unidades en el documento.")
 
             except Exception as e:
                 st.error(f"❌ Ocurrió un error al procesar el archivo o inyectarlo en Google Sheets: {e}")
