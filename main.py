@@ -4,6 +4,8 @@ import glob
 import base64
 from datetime import datetime
 import pytz
+import gspread
+from google.oauth2.service_account import Credentials
 
 # --- 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS NEÓN + VIDEO LOCAL DE FONDO ---
 st.set_page_config(
@@ -145,6 +147,20 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+# --- CONFIGURACIÓN DE GOOGLE SHEETS ---
+ID_HOJA = "10RXYbyOVD8UVwCDWv3btpj9ddLv5cacJRCAKes"
+
+@st.cache_resource
+def conectar_google_sheets():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"], scopes=scopes
+    )
+    return gspread.authorize(creds)
 
 # --- 2. ESTADOS DE SESIÓN ---
 if "autenticado" not in st.session_state:
@@ -370,4 +386,26 @@ else:
                 if not nombre or not apellido or not cedula or rango == "SELECCIONAR":
                     st.error("❌ Por favor complete los campos obligatorios principales de la Pestaña 1 (Rango, Nombre, Apellido y Cédula).")
                 else:
-                    st.success("✔️ Formulario listo para configurar la nueva conexión.")
+                    try:
+                        tz = pytz.timezone('America/Panama')
+                        timestamp = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+                        usuario_reg = st.session_state.get("usuario_actual", "DESCONOCIDO")
+
+                        nueva_fila = [
+                            "", timestamp, usuario_reg, rango, posic, placa_metalica, nombre, apellido, cedula,
+                            str(fecha_naci), str(edad), genero, telefono_personal, estamento, num_promocion, descripcion_promo,
+                            str(fecha_ingreso), str(anos_servicios), res_ogd, asig_trasl, direc_depen, asignado_centro, u_centro_asignado,
+                            departamento, turno, grupo, funcion, estado_status, operat_no_operat, perm_temp, condicion, apto_no_apto,
+                            nivel_salud, observacion, cert_buena_salud, str(fecha_diagnostico), str(f_prox_evaluacion), salud_ocupacional,
+                            pensionado_opt, provincia, distrito, corregimiento, lugar, tipo_sangre, nombre_familiar, parentesco,
+                            telefono_familiar, estado_civil, donante_sangre, secundaria, universidad, str(hijos_m), str(hijas_f),
+                            str(total_hijos), talla_camisa, talla_pantalon, talla_sueter, talla_botas, talla_zapatos, talla_quepi, talla_correa
+                        ]
+
+                        cliente_gs = conectar_google_sheets()
+                        hoja_bd = cliente_gs.open_by_key(ID_HOJA).worksheet("Plan_de_Recojo")
+                        hoja_bd.append_row(nueva_fila)
+
+                        st.success(f"✔️ El elemento {rango} {nombre} {apellido} con cédula {cedula} ha sido registrado exitosamente.")
+                    except Exception as e:
+                        st.error(f"❌ Ocurrió un error al guardar en la base de datos: {e}")
