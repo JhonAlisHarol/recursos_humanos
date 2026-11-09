@@ -443,7 +443,7 @@ else:
 
         if archivo_subido is not None:
             try:
-                # Lectura indicando que los encabezados están en la Fila 2 (índice 1)
+                # Lectura de la carga masiva desde la fila de encabezados correcta (Fila 2 / índice 1)
                 if archivo_subido.name.endswith('.csv'):
                     df_subido = pd.read_csv(archivo_subido, header=1)
                 else:
@@ -463,23 +463,23 @@ else:
                         filas_a_insertar = []
 
                         for _, row in df_subido.iterrows():
-                            # Mapeo exacto adaptado a los nombres de columnas de tu archivo de carga
+                            # Mapeo exacto adaptado a las columnas de tu archivo Excel de carga masiva
                             fila_procesada = [
-                                "", # Columna A: Nº
+                                "", # Columna A (Nº - autoincremental en la hoja)
                                 str(row.get("TIMESTAMP", timestamp_actual)),
                                 str(row.get("USUARIO_REGISTRO", usuario_reg + " (Masivo)")),
                                 str(row.get("RANGO", "")),
                                 str(row.get("POSIC", "")),
-                                str(row.get("Nº PLACA METALICA", "")),  # Mapeo correcto
+                                str(row.get("Nº PLACA METALICA", "")),
                                 str(row.get("NOMBRE", "")),
                                 str(row.get("APELLIDO", "")),
-                                str(row.get("Nº CEDULA", "")),         # Mapeo correcto
-                                str(row.get("FECHA DE NACI.", "")),     # Mapeo correcto
+                                str(row.get("Nº CEDULA", "")),
+                                str(row.get("FECHA DE NACI.", "")),
                                 str(row.get("EDAD", "")),
                                 str(row.get("GENERO", "")),
-                                str(row.get("Teléfono Personal", "")),  # Mapeo correcto
+                                str(row.get("Teléfono Personal", "")),
                                 str(row.get("ESTAMENTO", "")),
-                                str(row.get("PROMOCIÓN", "")),          # Mapeo correcto
+                                str(row.get("PROMOCIÓN", "")),
                                 str(row.get("DESCRIPCION", "")),
                                 str(row.get("FECHA DE INGRESO", "")),
                                 str(row.get("ANOS_SERVICIOS", "")),
@@ -509,7 +509,7 @@ else:
                                 str(row.get("CORREGIMIENTO", "")),
                                 str(row.get("LUGAR", "")),
                                 str(row.get("TIPO SANGRE", "")),
-                                str(row.get("NOMBRE", "")), # Emergencia
+                                str(row.get("NOMBRE", "")),  # Emergencia
                                 str(row.get("PARENTESCO", "")),
                                 str(row.get("TELEFONO", "")),
                                 str(row.get("ESTADO CIVIL", "")),
