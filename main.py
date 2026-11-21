@@ -154,7 +154,7 @@ st.markdown(
 
 # --- CONFIGURACIÓN DE GOOGLE SHEETS ---
 ID_HOJA = "10RXYbyOVD8DVUvwCDwVa3Btpj9dd2mLv5cacJRCAKes"
-PESTANA_DEFECTO_MASIVA = "Unidades_Agregadas"
+PESTANA_DEFECTO_MASIVA = "Vac.Jubilacion_U.Prestados_U.Trasladados"
 
 COLUMNAS_OFICIALES = [
     "TIMESTAMP", "USUARIO_REGISTRO", "RANGO", "POSIC", "PLACA_METALICA",
@@ -197,7 +197,6 @@ def obtener_o_crear_worksheet(nombre_pestana=PESTANA_DEFECTO_MASIVA):
         ws = libro.worksheet(nombre_pestana)
     except gspread.WorksheetNotFound:
         ws = libro.add_worksheet(title=nombre_pestana, rows=1000, cols=len(COLUMNAS_OFICIALES))
-    # Si la pestaña está completamente vacía, colocar los 60 encabezados oficiales en A1:BH1
     if not ws.row_values(1):
         ws.append_row(COLUMNAS_OFICIALES, value_input_option="USER_ENTERED")
     return ws
@@ -208,7 +207,9 @@ def es_placeholder_vacio(val):
     s = str(val).strip()
     if s == "" or s.upper() in ("NAN", "NAT", "NONE", "00:00:00", "SELECCIONAR"):
         return True
-    if re.fullmatch(r"[xX*\-.\s]+", s) and s.upper() != "XX":
+    if s.upper() in ("X", "XX", "XXX", "XXXX", "XXXXX", "XXXXXX", "********", "…"):
+        return True
+    if re.fullmatch(r"[xX*\-.\s…]+", s) and s.upper() not in ("XX", "X"):
         return True
     return False
 
@@ -222,12 +223,28 @@ def limpiar_valor(val):
         s = s[:-2]
     return s.upper()
 
+def normalizar_estado_filtro(val):
+    s = limpiar_valor(val)
+    if not s:
+        return ""
+    if "JUB" in s or "JUBIL" in s:
+        return "VACACIONES POR JUBILACIONES"
+    if "TRASLAD" in s:
+        return "TRASLADADOS"
+    if "PRESTADO" in s:
+        return "PRESTADO"
+    if "ASIGNADO" in s:
+        return "ASIGNADO"
+    return s
+
 def parsear_fecha_flexible(val):
     if es_placeholder_vacio(val):
         return None
     if isinstance(val, (datetime, date, pd.Timestamp)):
         return val.date() if isinstance(val, datetime) else val
     s = str(val).strip()
+    if re.search(r"[A-Za-z]{3,}", s):
+        return None
     dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
     if pd.notna(dt):
         return dt.date()
@@ -279,13 +296,16 @@ def preparar_df_masivo(df_raw, usuario_actual, ahora_pa):
         else:
             df_limpio[col] = ""
 
+    # Normalizar ESTADO_STATUS para filtros (VACACIONES POR JUBILACIONES / TRASLADADOS / PRESTADO / ASIGNADO)
+    df_limpio["ESTADO_STATUS"] = df_limpio["ESTADO_STATUS"].apply(normalizar_estado_filtro)
+
     # Autorrellenar TIMESTAMP y USUARIO_REGISTRO si vienen vacíos
     df_limpio["TIMESTAMP"] = df_limpio["TIMESTAMP"].apply(lambda x: x if x else ahora_str)
     df_limpio["USUARIO_REGISTRO"] = df_limpio["USUARIO_REGISTRO"].apply(
         lambda x: x if x else usuario_str
     )
 
-    # Calcular EDAD y ANOS_SERVICIOS solo si hay fecha válida (si no, dejar en blanco "")
+    # Calcular EDAD y ANOS_SERVICIOS solo si hay fecha válida (si no, blanco "")
     fechas_nac = df_limpio["FECHA_NACIMIENTO"].apply(parsear_fecha_flexible)
     df_limpio["FECHA_NACIMIENTO"] = fechas_nac.apply(
         lambda d: d.strftime("%Y-%m-%d") if d else ""
@@ -298,7 +318,7 @@ def preparar_df_masivo(df_raw, usuario_actual, ahora_pa):
     )
     df_limpio["ANOS_SERVICIOS"] = fechas_ing.apply(lambda d: calcular_anios(d, hoy_date))
 
-    # Calcular TOTAL_HIJOS solo si HIJOS_M o HIJAS_F tiene dato (si ambos vacíos, dejar en blanco "")
+    # Calcular TOTAL_HIJOS solo si HIJOS_M o HIJAS_F tiene dato (si ambos vacíos, blanco "")
     df_limpio["TOTAL_HIJOS"] = [
         calcular_hijos_fila(m, f)
         for m, f in zip(df_limpio["HIJOS_M"], df_limpio["HIJAS_F"])
@@ -379,7 +399,11 @@ else:
         "COCLÉ", "HERRERA", "LOS SANTOS", "BOCAS DEL TORO", "DARIÉN",
         "COMARCA NGÄBE-BUGLÉ", "COMARCA GUNA YALA", "COMARCA EMBERÁ-WOUNAAN",
     ]
-    lista_estados = ["SELECCIONAR", "ACTIVO", "INACTIVO", "VACACIONES", "PENSIONADO", "INCAPACITADO"]
+    lista_estados = [
+        "SELECCIONAR", "ACTIVO", "INACTIVO", "VACACIONES",
+        "VACACIONES POR JUBILACIONES", "TRASLADADOS", "PRESTADO", "ASIGNADO",
+        "PENSIONADO", "INCAPACITADO",
+    ]
     lista_estado_civil = ["SELECCIONAR", "SOLTERO/A", "CASADO/A", "UNIDO/A", "DIVORCIADO/A", "VIUDO/A"]
     lista_si_no = ["NO", "SÍ"]
     lista_select_si_no = ["SELECCIONAR", "SÍ", "NO"]
@@ -411,7 +435,7 @@ else:
         st.subheader("Módulos de Operación")
         modulo_activo = st.radio(
             "Seleccione un módulo:",
-            ["➕ Registro Individual", "📥 Carga Masiva (Unidades_Agregadas)"],
+            ["➕ Registro Individual", "📥 Carga Masiva (Vac.Jubilacion_U.Prestados_U.Trasladados)"],
             label_visibility="collapsed",
         )
 
@@ -621,18 +645,18 @@ else:
                             st.error(f"❌ Ocurrió un error al guardar en la base de datos: {e}")
 
     # ==========================================
-    # MÓDULO 2: CARGA MASIVA -> UNIDADES_AGREGADAS
+    # MÓDULO 2: CARGA MASIVA -> Vac.Jubilacion_U.Prestados_U.Trasladados
     # ==========================================
-    elif modulo_activo == "📥 Carga Masiva (Unidades_Agregadas)":
+    elif modulo_activo == "📥 Carga Masiva (Vac.Jubilacion_U.Prestados_U.Trasladados)":
         st.markdown(
-            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>📥 CARGA MASIVA — PESTAÑA UNIDADES_AGREGADAS</h1>",
+            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>📥 CARGA MASIVA — VAC.JUBILACION / U.PRESTADOS / U.TRASLADADOS</h1>",
             unsafe_allow_html=True,
         )
 
         st.markdown('<div class="neon-card">', unsafe_allow_html=True)
         st.write(
-            "Sube el archivo Excel (**`.xlsx`** / **`.xls`**) o **`.csv`** con los 60 encabezados del sistema. "
-            "Los campos sin valor o con `XXX` / `***` quedan en blanco, se calculan automáticamente **EDAD**, **AÑOS DE SERVICIO** y **TOTAL DE HIJOS** solo donde hay datos, y se guardan en **`Unidades_Agregadas`** sin tocar `Plan_de_Recojo`."
+            "Sube el archivo Excel (**`.xlsx`** / **`.xls`**) o **`.csv`** unificado con los 60 encabezados oficiales. "
+            "Los campos sin valor o con `XXX` / `***` quedan en blanco, se estandariza **`ESTADO_STATUS`** (`VACACIONES POR JUBILACIONES`, `TRASLADADOS`, `PRESTADO`, `ASIGNADO`), se calculan automáticamente **EDAD**, **AÑOS DE SERVICIO** y **TOTAL DE HIJOS** solo donde hay datos, y se guardan en **`Vac.Jubilacion_U.Prestados_U.Trasladados`** sin tocar las demás pestañas."
         )
 
         try:
@@ -642,7 +666,7 @@ else:
                 pestanas_gs.insert(0, PESTANA_DEFECTO_MASIVA)
             idx_defecto = pestanas_gs.index(PESTANA_DEFECTO_MASIVA)
         except Exception:
-            pestanas_gs = [PESTANA_DEFECTO_MASIVA, "Plan_de_Recojo", "Unidades_Trasladadas"]
+            pestanas_gs = [PESTANA_DEFECTO_MASIVA, "Plan_de_Recojo", "Unidades_Agregadas"]
             idx_defecto = 0
 
         pestana_destino = st.selectbox(
