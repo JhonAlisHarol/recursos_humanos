@@ -154,7 +154,7 @@ st.markdown(
 
 # --- CONFIGURACIÓN DE GOOGLE SHEETS ---
 ID_HOJA = "10RXYbyOVD8DVUvwCDwVa3Btpj9dd2mLv5cacJRCAKes"
-PESTANA_DEFECTO_MASIVA = "Vac.Jubilacion_U.Prestados_U.Trasladados"
+PESTANA_PERSONAL = "Plan_de_Recojo"
 PESTANA_NOVEDADES = "Permiso,incapacidad,licencia"
 
 COLUMNAS_OFICIALES = [
@@ -185,12 +185,6 @@ COLUMNAS_NOVEDADES = [
     "OBSERVACION",
 ]
 
-MESES_ES = {
-    "ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4, "MAYO": 5, "JUNIO": 6,
-    "JULIO": 7, "AGOSTO": 8, "SEPTIEMBRE": 9, "SETIEMBRE": 9,
-    "OCTUBRE": 10, "NOVIEMBRE": 11, "DICIEMBRE": 12,
-}
-
 @st.cache_resource
 def conectar_google_sheets():
     scopes = [
@@ -202,7 +196,7 @@ def conectar_google_sheets():
     )
     return gspread.authorize(creds)
 
-def obtener_o_crear_worksheet(nombre_pestana=PESTANA_DEFECTO_MASIVA, columnas_hdr=None):
+def obtener_o_crear_worksheet(nombre_pestana, columnas_hdr=None):
     if columnas_hdr is None:
         columnas_hdr = COLUMNAS_NOVEDADES if nombre_pestana == PESTANA_NOVEDADES else COLUMNAS_OFICIALES
     cliente_gs = conectar_google_sheets()
@@ -237,39 +231,6 @@ def limpiar_valor(val):
         s = s[:-2]
     return s.upper()
 
-def normalizar_estado_filtro(val):
-    s = limpiar_valor(val)
-    if not s:
-        return ""
-    if "JUB" in s or "JUBIL" in s:
-        return "VACACIONES POR JUBILACIONES"
-    if "TRASLAD" in s:
-        return "TRASLADADOS"
-    if "PRESTADO" in s:
-        return "PRESTADO"
-    if "ASIGNADO" in s:
-        return "ASIGNADO"
-    return s
-
-def parsear_fecha_flexible(val):
-    if es_placeholder_vacio(val):
-        return None
-    if isinstance(val, (datetime, date, pd.Timestamp)):
-        return val.date() if isinstance(val, datetime) else val
-    s = str(val).strip()
-    if re.search(r"[A-Za-z]{3,}", s):
-        return None
-    dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
-    if pd.notna(dt):
-        return dt.date()
-    m = re.search(r"(\d{1,2})\s*(?:DE\s+)?([A-ZÁÉÍÓÚÜÑ]+)\s*(?:DE\s+)?(\d{4})", s.upper())
-    if m and m.group(2) in MESES_ES:
-        try:
-            return date(int(m.group(3)), MESES_ES[m.group(2)], int(m.group(1)))
-        except ValueError:
-            pass
-    return None
-
 def calcular_anios(fecha_ref, hoy):
     if not fecha_ref:
         return ""
@@ -297,118 +258,6 @@ def calcular_alerta_reintegro(fecha_fin, estado_tramite, hoy):
     if (fecha_fin - hoy).days <= 2:
         return "REINCORPORA PRONTO"
     return "EN CURSO"
-
-def preparar_df_masivo(df_raw, usuario_actual, ahora_pa):
-    df = df_raw.copy()
-
-    cols_actuales = [str(c).strip().upper() for c in df.columns]
-    if "RANGO" not in cols_actuales and "NOMBRE" not in cols_actuales and len(df) > 0:
-        posibles_cols = [str(c).strip().upper() for c in df.iloc[0]]
-        if "RANGO" in posibles_cols or "NOMBRE" in posibles_cols:
-            df.columns = posibles_cols
-            df = df.iloc[1:].reset_index(drop=True)
-        else:
-            df.columns = cols_actuales
-    else:
-        df.columns = cols_actuales
-
-    ahora_str = ahora_pa.strftime("%Y-%m-%d %H:%M:%S")
-    hoy_date = ahora_pa.date()
-    usuario_str = str(usuario_actual).strip().upper()
-
-    df_limpio = pd.DataFrame(index=df.index, columns=COLUMNAS_OFICIALES)
-    for col in COLUMNAS_OFICIALES:
-        if col in df.columns:
-            df_limpio[col] = df[col].apply(limpiar_valor)
-        else:
-            df_limpio[col] = ""
-
-    df_limpio["ESTADO_STATUS"] = df_limpio["ESTADO_STATUS"].apply(normalizar_estado_filtro)
-    df_limpio["TIMESTAMP"] = df_limpio["TIMESTAMP"].apply(lambda x: x if x else ahora_str)
-    df_limpio["USUARIO_REGISTRO"] = df_limpio["USUARIO_REGISTRO"].apply(
-        lambda x: x if x else usuario_str
-    )
-
-    fechas_nac = df_limpio["FECHA_NACIMIENTO"].apply(parsear_fecha_flexible)
-    df_limpio["FECHA_NACIMIENTO"] = fechas_nac.apply(
-        lambda d: d.strftime("%Y-%m-%d") if d else ""
-    )
-    df_limpio["EDAD"] = fechas_nac.apply(lambda d: calcular_anios(d, hoy_date))
-
-    fechas_ing = df_limpio["FECHA_INGRESO"].apply(parsear_fecha_flexible)
-    df_limpio["FECHA_INGRESO"] = fechas_ing.apply(
-        lambda d: d.strftime("%Y-%m-%d") if d else ""
-    )
-    df_limpio["ANOS_SERVICIOS"] = fechas_ing.apply(lambda d: calcular_anios(d, hoy_date))
-
-    df_limpio["TOTAL_HIJOS"] = [
-        calcular_hijos_fila(m, f)
-        for m, f in zip(df_limpio["HIJOS_M"], df_limpio["HIJAS_F"])
-    ]
-
-    mask_valida = (df_limpio["CEDULA"] != "") | (df_limpio["NOMBRE"] != "")
-    return df_limpio[mask_valida].reset_index(drop=True)
-
-def preparar_df_novedades_masivo(df_raw, usuario_actual, ahora_pa, correlativo_inicial=1):
-    df = df_raw.copy()
-
-    # Detectar si el encabezado está en fila 1 o en otra fila (ej. fila 7 del formato gerencial)
-    cols_actuales = [str(c).strip().upper() for c in df.columns]
-    if "TIPO_NOVEDAD" not in cols_actuales and "RANGO" not in cols_actuales:
-        for idx in range(min(10, len(df))):
-            fila_up = [str(x).strip().upper() for x in df.iloc[idx]]
-            if "TIPO_NOVEDAD" in fila_up or ("RANGO" in fila_up and "CEDULA" in fila_up):
-                df.columns = fila_up
-                df = df.iloc[idx + 1:].reset_index(drop=True)
-                break
-    else:
-        df.columns = cols_actuales
-
-    ahora_str = ahora_pa.strftime("%Y-%m-%d %H:%M:%S")
-    hoy_date = ahora_pa.date()
-    anio_actual = hoy_date.year
-    usuario_str = str(usuario_actual).strip().upper()
-
-    df_out = pd.DataFrame(index=df.index, columns=COLUMNAS_NOVEDADES)
-    for col in COLUMNAS_NOVEDADES:
-        if col in df.columns:
-            df_out[col] = df[col].apply(limpiar_valor)
-        else:
-            df_out[col] = ""
-
-    mask_valida = (df_out["CEDULA"] != "") | (df_out["NOMBRE"] != "")
-    df_out = df_out[mask_valida].reset_index(drop=True)
-
-    for i in range(len(df_out)):
-        if not df_out.loc[i, "ID_NOVEDAD"]:
-            df_out.loc[i, "ID_NOVEDAD"] = f"NOV-{anio_actual}-{correlativo_inicial + i:03d}"
-        if not df_out.loc[i, "TIMESTAMP"]:
-            df_out.loc[i, "TIMESTAMP"] = ahora_str
-        if not df_out.loc[i, "USUARIO_REGISTRO"]:
-            df_out.loc[i, "USUARIO_REGISTRO"] = usuario_str
-        if not df_out.loc[i, "ESTADO_TRAMITE"]:
-            df_out.loc[i, "ESTADO_TRAMITE"] = "VIGENTE"
-
-        f_ini = parsear_fecha_flexible(df_out.loc[i, "FECHA_INICIO"])
-        f_fin = parsear_fecha_flexible(df_out.loc[i, "FECHA_FIN"])
-        df_out.loc[i, "FECHA_INICIO"] = f_ini.strftime("%Y-%m-%d") if f_ini else ""
-        df_out.loc[i, "FECHA_FIN"] = f_fin.strftime("%Y-%m-%d") if f_fin else ""
-
-        if f_ini and f_fin and f_fin >= f_ini:
-            df_out.loc[i, "DIAS_TOTALES"] = int((f_fin - f_ini).days + 1)
-        else:
-            df_out.loc[i, "DIAS_TOTALES"] = ""
-
-        if f_fin:
-            df_out.loc[i, "DIAS_RESTANTES"] = int(max(0, (f_fin - hoy_date).days))
-        else:
-            df_out.loc[i, "DIAS_RESTANTES"] = ""
-
-        df_out.loc[i, "ALERTA_REINTEGRO"] = calcular_alerta_reintegro(
-            f_fin, df_out.loc[i, "ESTADO_TRAMITE"], hoy_date
-        )
-
-    return df_out
 
 # --- 2. ESTADOS DE SESIÓN ---
 if "autenticado" not in st.session_state:
@@ -520,7 +369,6 @@ else:
             "Seleccione un módulo:",
             [
                 "➕ Registro Individual",
-                "📥 Carga Masiva (Vac.Jubilacion_U.Prestados_U.Trasladados)",
                 "🩺 Permisos, Incapacidades y Licencias",
             ],
             label_visibility="collapsed",
@@ -724,7 +572,7 @@ else:
                                 limpiar_valor(talla_correa),
                             ]
 
-                            hoja_bd = obtener_o_crear_worksheet("Plan_de_Recojo", COLUMNAS_OFICIALES)
+                            hoja_bd = obtener_o_crear_worksheet(PESTANA_PERSONAL, COLUMNAS_OFICIALES)
                             hoja_bd.append_row(nueva_fila, value_input_option="USER_ENTERED")
 
                             st.success(f"✔️ El elemento {limpiar_valor(rango)} {limpiar_valor(nombre)} {limpiar_valor(apellido)} con cédula {limpiar_valor(cedula)} ha sido registrado exitosamente.")
@@ -732,74 +580,7 @@ else:
                             st.error(f"❌ Ocurrió un error al guardar en la base de datos: {e}")
 
     # ==========================================
-    # MÓDULO 2: CARGA MASIVA -> Vac.Jubilacion_U.Prestados_U.Trasladados
-    # ==========================================
-    elif modulo_activo == "📥 Carga Masiva (Vac.Jubilacion_U.Prestados_U.Trasladados)":
-        st.markdown(
-            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>📥 CARGA MASIVA — VAC.JUBILACION / U.PRESTADOS / U.TRASLADADOS</h1>",
-            unsafe_allow_html=True,
-        )
-
-        st.markdown('<div class="neon-card">', unsafe_allow_html=True)
-        st.write(
-            "Sube el archivo Excel (**`.xlsx`** / **`.xls`**) o **`.csv`** unificado con los 60 encabezados oficiales. "
-            "Los campos sin valor o con `XXX` / `***` quedan en blanco, se estandariza **`ESTADO_STATUS`**, se calculan automáticamente **EDAD**, **AÑOS DE SERVICIO** y **TOTAL DE HIJOS** solo donde hay datos, y se guardan sin tocar las demás pestañas."
-        )
-
-        try:
-            libro_gs = conectar_google_sheets().open_by_key(ID_HOJA)
-            pestanas_gs = [w.title for w in libro_gs.worksheets() if w.title != PESTANA_NOVEDADES]
-            if PESTANA_DEFECTO_MASIVA not in pestanas_gs:
-                pestanas_gs.insert(0, PESTANA_DEFECTO_MASIVA)
-            idx_defecto = pestanas_gs.index(PESTANA_DEFECTO_MASIVA)
-        except Exception:
-            pestanas_gs = [PESTANA_DEFECTO_MASIVA, "Plan_de_Recojo", "Unidades_Agregadas"]
-            idx_defecto = 0
-
-        pestana_destino = st.selectbox(
-            "Pestaña destino en Google Sheets:",
-            pestanas_gs,
-            index=idx_defecto,
-        )
-
-        archivo_subido = st.file_uploader(
-            "Seleccionar archivo Excel o CSV",
-            type=["xlsx", "xls", "csv"],
-        )
-
-        if archivo_subido is not None:
-            try:
-                if archivo_subido.name.lower().endswith(".csv"):
-                    df_origen = pd.read_csv(archivo_subido, dtype=str)
-                else:
-                    hojas_excel = pd.ExcelFile(archivo_subido)
-                    pestana_excel = st.selectbox("Selecciona la pestaña del archivo subido:", hojas_excel.sheet_names)
-                    df_origen = pd.read_excel(archivo_subido, sheet_name=pestana_excel, dtype=str)
-
-                df_preparado = preparar_df_masivo(
-                    df_origen,
-                    st.session_state.get("usuario_actual", "ADMINISTRADOR"),
-                    ahora_pa,
-                )
-
-                if df_preparado.empty:
-                    st.warning("⚠️ No se encontraron filas válidas con NOMBRE o CÉDULA en el archivo.")
-                else:
-                    st.info(f"Registros listos para cargar en **{pestana_destino}**: **{len(df_preparado)}**")
-                    st.dataframe(df_preparado.head(20), use_container_width=True)
-
-                    if st.button(f"🚀 Subir {len(df_preparado)} Registros a {pestana_destino}", use_container_width=True):
-                        ws_destino = obtener_o_crear_worksheet(pestana_destino, COLUMNAS_OFICIALES)
-                        filas_a_subir = df_preparado.values.tolist()
-                        ws_destino.append_rows(filas_a_subir, value_input_option="USER_ENTERED")
-                        st.success(f"✔️ Se cargaron **{len(filas_a_subir)}** registros en la pestaña **`{pestana_destino}`** sin alterar otras pestañas.")
-            except Exception as e:
-                st.error(f"❌ Error al procesar o subir el archivo: {e}")
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    # ==========================================
-    # MÓDULO 3: PERMISOS, INCAPACIDADES Y LICENCIAS (ESQUEMA GERENCIAL SIN PLACA)
+    # MÓDULO 2: PERMISOS, INCAPACIDADES Y LICENCIAS (REGISTRO INDIVIDUAL)
     # ==========================================
     elif modulo_activo == "🩺 Permisos, Incapacidades y Licencias":
         st.markdown(
@@ -807,145 +588,92 @@ else:
             unsafe_allow_html=True,
         )
 
-        sub_ind, sub_mas = st.tabs([
-            "📝 1. Registro Individual de Novedad",
-            "📥 2. Carga Masiva (Excel / CSV)",
-        ])
+        with st.form("form_novedad_gerencial", clear_on_submit=True):
+            st.markdown("<h3 style='color: #00d4ff;'>1. Identificación de la Unidad</h3>", unsafe_allow_html=True)
+            n1, n2, n3, n4, n5, n6 = st.columns(6)
+            nov_rango = n1.selectbox("RANGO *", lista_rangos)
+            nov_posic = n2.text_input("POSIC")
+            nov_nombre = n3.text_input("NOMBRE *")
+            nov_apellido = n4.text_input("APELLIDO *")
+            nov_cedula = n5.text_input("CÉDULA *")
+            nov_estamento = n6.selectbox("ESTAMENTO", lista_estamentos)
 
-        with sub_ind:
-            with st.form("form_novedad_gerencial", clear_on_submit=True):
-                st.markdown("<h3 style='color: #00d4ff;'>1. Identificación de la Unidad</h3>", unsafe_allow_html=True)
-                n1, n2, n3, n4, n5, n6 = st.columns(6)
-                nov_rango = n1.selectbox("RANGO *", lista_rangos)
-                nov_posic = n2.text_input("POSIC")
-                nov_nombre = n3.text_input("NOMBRE *")
-                nov_apellido = n4.text_input("APELLIDO *")
-                nov_cedula = n5.text_input("CÉDULA *")
-                nov_estamento = n6.selectbox("ESTAMENTO", lista_estamentos)
-
-                st.markdown("<h3 style='color: #00d4ff;'>2. Ubicación Operativa y Cobertura</h3>", unsafe_allow_html=True)
-                u1, u2, u3, u4, u5, u6 = st.columns(6)
-                nov_centro = u1.selectbox("ASIGNADO_CENTRO", lista_centros)
-                nov_depto = u2.selectbox("DEPARTAMENTO", lista_departamentos)
-                nov_turno = u3.selectbox("TURNO", lista_turnos)
-                nov_grupo = u4.text_input("GRUPO")
-                nov_funcion = u5.text_input("FUNCIÓN")
-                nov_impacto = u6.selectbox(
-                    "IMPACTO_OPERATIVO",
-                    ["SIN AFECTACIÓN", "CUBIERTO POR GRUPO", "REQUIERE RELEVO", "CRÍTICO EN TURNO"],
-                )
-
-                st.markdown("<h3 style='color: #00d4ff;'>3. Detalle de Novedad y Respaldo Documental</h3>", unsafe_allow_html=True)
-                d1, d2, d3, d4, d5 = st.columns(5)
-                nov_tipo = d1.selectbox("TIPO_NOVEDAD *", ["PERMISO", "INCAPACIDAD", "LICENCIA"])
-                nov_subtipo = d2.text_input("SUBTIPO_MOTIVO *")
-                nov_f_inicio = d3.date_input("FECHA_INICIO *", value=hoy_pa)
-                nov_f_fin = d4.date_input("FECHA_FIN *", value=hoy_pa)
-                nov_estado = d5.selectbox("ESTADO_TRAMITE", ["VIGENTE", "FINALIZADO", "PRORROGADO", "ANULADO"])
-
-                r1, r2, r3, r4 = st.columns(4)
-                nov_doc = r1.text_input("NUM_DOCUMENTO_RESPALDO")
-                nov_entidad = r2.text_input("ENTIDAD_EMISORA")
-                nov_autorizado = r3.text_input("AUTORIZADO_POR")
-                nov_obs = r4.text_input("OBSERVACION")
-
-                guardar_nov = st.form_submit_button("💾 Registrar en Permiso,incapacidad,licencia", use_container_width=True)
-
-                if guardar_nov:
-                    if not nov_nombre.strip() or not nov_apellido.strip() or not nov_cedula.strip() or nov_rango == "SELECCIONAR":
-                        st.error("❌ Complete los campos obligatorios: Rango, Nombre, Apellido y Cédula.")
-                    elif nov_f_fin < nov_f_inicio:
-                        st.error("❌ La FECHA_FIN no puede ser anterior a la FECHA_INICIO.")
-                    else:
-                        try:
-                            ws_nov = obtener_o_crear_worksheet(PESTANA_NOVEDADES, COLUMNAS_NOVEDADES)
-                            filas_existentes = len(ws_nov.get_all_values())
-                            correlativo = max(1, filas_existentes)
-                            id_nov = f"NOV-{hoy_pa.year}-{correlativo:03d}"
-
-                            dias_totales = int((nov_f_fin - nov_f_inicio).days + 1)
-                            dias_restantes = int(max(0, (nov_f_fin - hoy_pa).days))
-                            alerta_reint = calcular_alerta_reintegro(nov_f_fin, nov_estado, hoy_pa)
-                            usuario_reg = st.session_state.get("usuario_actual", "ADMINISTRADOR")
-
-                            fila_nov = [
-                                id_nov,
-                                timestamp_actual,
-                                limpiar_valor(usuario_reg),
-                                limpiar_valor(nov_rango),
-                                limpiar_valor(nov_posic),
-                                limpiar_valor(nov_nombre),
-                                limpiar_valor(nov_apellido),
-                                limpiar_valor(nov_cedula),
-                                limpiar_valor(nov_estamento),
-                                limpiar_valor(nov_centro),
-                                limpiar_valor(nov_depto),
-                                limpiar_valor(nov_turno),
-                                limpiar_valor(nov_grupo),
-                                limpiar_valor(nov_funcion),
-                                limpiar_valor(nov_impacto),
-                                limpiar_valor(nov_tipo),
-                                limpiar_valor(nov_subtipo),
-                                str(nov_f_inicio),
-                                str(nov_f_fin),
-                                dias_totales,
-                                dias_restantes,
-                                limpiar_valor(nov_estado),
-                                alerta_reint,
-                                limpiar_valor(nov_doc),
-                                limpiar_valor(nov_entidad),
-                                limpiar_valor(nov_autorizado),
-                                limpiar_valor(nov_obs),
-                            ]
-
-                            ws_nov.append_row(fila_nov, value_input_option="USER_ENTERED")
-                            st.success(f"✔️ Registro **{id_nov}** ({limpiar_valor(nov_tipo)}) guardado en **`{PESTANA_NOVEDADES}`** ({dias_totales} días).")
-                        except Exception as e:
-                            st.error(f"❌ Error al guardar en `{PESTANA_NOVEDADES}`: {e}")
-
-        with sub_mas:
-            st.markdown('<div class="neon-card">', unsafe_allow_html=True)
-            st.write(
-                "Sube el Excel con la pestaña **`Permiso,incapacidad,licencia`** (27 columnas gerenciales sin `PLACA_METALICA`). "
-                "El sistema calcula automáticamente **`DIAS_TOTALES`**, **`DIAS_RESTANTES`** y **`ALERTA_REINTEGRO`** y los agrega sin tocar las demás pestañas."
+            st.markdown("<h3 style='color: #00d4ff;'>2. Ubicación Operativa y Cobertura</h3>", unsafe_allow_html=True)
+            u1, u2, u3, u4, u5, u6 = st.columns(6)
+            nov_centro = u1.selectbox("ASIGNADO_CENTRO", lista_centros)
+            nov_depto = u2.selectbox("DEPARTAMENTO", lista_departamentos)
+            nov_turno = u3.selectbox("TURNO", lista_turnos)
+            nov_grupo = u4.text_input("GRUPO")
+            nov_funcion = u5.text_input("FUNCIÓN")
+            nov_impacto = u6.selectbox(
+                "IMPACTO_OPERATIVO",
+                ["SIN AFECTACIÓN", "CUBIERTO POR GRUPO", "REQUIERE RELEVO", "CRÍTICO EN TURNO"],
             )
 
-            archivo_nov = st.file_uploader(
-                "Seleccionar archivo Excel o CSV de Novedades",
-                type=["xlsx", "xls", "csv"],
-                key="uploader_novedades",
-            )
+            st.markdown("<h3 style='color: #00d4ff;'>3. Detalle de Novedad y Respaldo Documental</h3>", unsafe_allow_html=True)
+            d1, d2, d3, d4, d5 = st.columns(5)
+            nov_tipo = d1.selectbox("TIPO_NOVEDAD *", ["PERMISO", "INCAPACIDAD", "LICENCIA"])
+            nov_subtipo = d2.text_input("SUBTIPO_MOTIVO *")
+            nov_f_inicio = d3.date_input("FECHA_INICIO *", value=hoy_pa)
+            nov_f_fin = d4.date_input("FECHA_FIN *", value=hoy_pa)
+            nov_estado = d5.selectbox("ESTADO_TRAMITE", ["VIGENTE", "FINALIZADO", "PRORROGADO", "ANULADO"])
 
-            if archivo_nov is not None:
-                try:
-                    if archivo_nov.name.lower().endswith(".csv"):
-                        df_nov_raw = pd.read_csv(archivo_nov, dtype=str)
-                    else:
-                        xl_nov = pd.ExcelFile(archivo_nov)
-                        idx_hoja_nov = xl_nov.sheet_names.index(PESTANA_NOVEDADES) if PESTANA_NOVEDADES in xl_nov.sheet_names else 0
-                        hoja_sel_nov = st.selectbox("Pestaña del archivo:", xl_nov.sheet_names, index=idx_hoja_nov, key="sel_hoja_nov")
-                        df_nov_raw = pd.read_excel(archivo_nov, sheet_name=hoja_sel_nov, dtype=str)
+            r1, r2, r3, r4 = st.columns(4)
+            nov_doc = r1.text_input("NUM_DOCUMENTO_RESPALDO")
+            nov_entidad = r2.text_input("ENTIDAD_EMISORA")
+            nov_autorizado = r3.text_input("AUTORIZADO_POR")
+            nov_obs = r4.text_input("OBSERVACION")
 
-                    ws_nov_check = obtener_o_crear_worksheet(PESTANA_NOVEDADES, COLUMNAS_NOVEDADES)
-                    siguiente_id = max(1, len(ws_nov_check.get_all_values()))
+            guardar_nov = st.form_submit_button("💾 Registrar en Permiso,incapacidad,licencia", use_container_width=True)
 
-                    df_nov_prep = preparar_df_novedades_masivo(
-                        df_nov_raw,
-                        st.session_state.get("usuario_actual", "ADMINISTRADOR"),
-                        ahora_pa,
-                        correlativo_inicial=siguiente_id,
-                    )
+            if guardar_nov:
+                if not nov_nombre.strip() or not nov_apellido.strip() or not nov_cedula.strip() or nov_rango == "SELECCIONAR":
+                    st.error("❌ Complete los campos obligatorios: Rango, Nombre, Apellido y Cédula.")
+                elif nov_f_fin < nov_f_inicio:
+                    st.error("❌ La FECHA_FIN no puede ser anterior a la FECHA_INICIO.")
+                else:
+                    try:
+                        ws_nov = obtener_o_crear_worksheet(PESTANA_NOVEDADES, COLUMNAS_NOVEDADES)
+                        filas_existentes = len(ws_nov.get_all_values())
+                        correlativo = max(1, filas_existentes)
+                        id_nov = f"NOV-{hoy_pa.year}-{correlativo:03d}"
 
-                    if df_nov_prep.empty:
-                        st.warning("⚠️ No se encontraron registros válidos con NOMBRE o CÉDULA.")
-                    else:
-                        st.info(f"Novedades listas para agregar en **{PESTANA_NOVEDADES}**: **{len(df_nov_prep)}**")
-                        st.dataframe(df_nov_prep, use_container_width=True)
+                        dias_totales = int((nov_f_fin - nov_f_inicio).days + 1)
+                        dias_restantes = int(max(0, (nov_f_fin - hoy_pa).days))
+                        alerta_reint = calcular_alerta_reintegro(nov_f_fin, nov_estado, hoy_pa)
+                        usuario_reg = st.session_state.get("usuario_actual", "ADMINISTRADOR")
 
-                        if st.button(f"🚀 Agregar {len(df_nov_prep)} Novedades a {PESTANA_NOVEDADES}", use_container_width=True):
-                            ws_nov_check.append_rows(df_nov_prep.values.tolist(), value_input_option="USER_ENTERED")
-                            st.success(f"✔️ Se agregaron **{len(df_nov_prep)}** registros en **`{PESTANA_NOVEDADES}`** sin alterar las demás pestañas.")
-                except Exception as e:
-                    st.error(f"❌ Error al procesar el archivo de novedades: {e}")
+                        fila_nov = [
+                            id_nov,
+                            timestamp_actual,
+                            limpiar_valor(usuario_reg),
+                            limpiar_valor(nov_rango),
+                            limpiar_valor(nov_posic),
+                            limpiar_valor(nov_nombre),
+                            limpiar_valor(nov_apellido),
+                            limpiar_valor(nov_cedula),
+                            limpiar_valor(nov_estamento),
+                            limpiar_valor(nov_centro),
+                            limpiar_valor(nov_depto),
+                            limpiar_valor(nov_turno),
+                            limpiar_valor(nov_grupo),
+                            limpiar_valor(nov_funcion),
+                            limpiar_valor(nov_impacto),
+                            limpiar_valor(nov_tipo),
+                            limpiar_valor(nov_subtipo),
+                            str(nov_f_inicio),
+                            str(nov_f_fin),
+                            dias_totales,
+                            dias_restantes,
+                            limpiar_valor(nov_estado),
+                            alerta_reint,
+                            limpiar_valor(nov_doc),
+                            limpiar_valor(nov_entidad),
+                            limpiar_valor(nov_autorizado),
+                            limpiar_valor(nov_obs),
+                        ]
 
-            st.markdown("</div>", unsafe_allow_html=True)
+                        ws_nov.append_row(fila_nov, value_input_option="USER_ENTERED")
+                        st.success(f"✔️ Registro **{id_nov}** ({limpiar_valor(nov_tipo)}) guardado en **`{PESTANA_NOVEDADES}`** ({dias_totales} días).")
+                    except Exception as e:
+                        st.error(f"❌ Error al guardar en `{PESTANA_NOVEDADES}`: {e}")
