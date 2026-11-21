@@ -3,6 +3,7 @@ import pandas as pd
 import glob
 import base64
 import re
+from io import BytesIO
 from datetime import datetime, date
 import pytz
 import gspread
@@ -155,6 +156,8 @@ st.markdown(
 # --- CONFIGURACIÓN DE GOOGLE SHEETS ---
 ID_HOJA = "10RXYbyOVD8DVUvwCDwVa3Btpj9dd2mLv5cacJRCAKes"
 PESTANA_PERSONAL = "Plan_de_Recojo"
+PESTANA_AGREGADAS = "Unidades_Agregadas"
+PESTANA_JUB_PRES_TRAS = "Vac.Jubilacion_U.Prestados_U.Trasladados"
 PESTANA_NOVEDADES = "Permiso,incapacidad,licencia"
 
 COLUMNAS_OFICIALES = [
@@ -208,6 +211,33 @@ def obtener_o_crear_worksheet(nombre_pestana, columnas_hdr=None):
     if not ws.row_values(1):
         ws.append_row(columnas_hdr, value_input_option="USER_ENTERED")
     return ws
+
+@st.cache_data(ttl=60)
+def leer_pestana_df(nombre_pestana, columnas_esperadas):
+    try:
+        ws = obtener_o_crear_worksheet(nombre_pestana, columnas_esperadas)
+        valores = ws.get_all_values()
+        if not valores or len(valores) <= 1:
+            return pd.DataFrame(columns=columnas_esperadas)
+        encabezados = [str(h).strip() for h in valores[0]]
+        filas = valores[1:]
+        # Ajustar longitud de cada fila por si tiene celdas vacías al final
+        num_cols = len(encabezados)
+        filas_norm = [
+            f[:num_cols] + [""] * max(0, num_cols - len(f))
+            for f in filas
+        ]
+        df = pd.DataFrame(filas_norm, columns=encabezados)
+        return df
+    except Exception as e:
+        st.error(f"❌ Error al leer la pestaña `{nombre_pestana}`: {e}")
+        return pd.DataFrame(columns=columnas_esperadas)
+
+def convertir_df_a_excel(df, nombre_hoja="Datos"):
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=nombre_hoja[:31])
+    return buffer.getvalue()
 
 def es_placeholder_vacio(val):
     if val is None or (isinstance(val, float) and pd.isna(val)):
@@ -370,6 +400,7 @@ else:
             [
                 "➕ Registro Individual",
                 "🩺 Permisos, Incapacidades y Licencias",
+                "📊 Consulta de Bases de Datos",
             ],
             label_visibility="collapsed",
         )
@@ -574,6 +605,7 @@ else:
 
                             hoja_bd = obtener_o_crear_worksheet(PESTANA_PERSONAL, COLUMNAS_OFICIALES)
                             hoja_bd.append_row(nueva_fila, value_input_option="USER_ENTERED")
+                            leer_pestana_df.clear()
 
                             st.success(f"✔️ El elemento {limpiar_valor(rango)} {limpiar_valor(nombre)} {limpiar_valor(apellido)} con cédula {limpiar_valor(cedula)} ha sido registrado exitosamente.")
                         except Exception as e:
@@ -674,6 +706,163 @@ else:
                         ]
 
                         ws_nov.append_row(fila_nov, value_input_option="USER_ENTERED")
+                        leer_pestana_df.clear()
                         st.success(f"✔️ Registro **{id_nov}** ({limpiar_valor(nov_tipo)}) guardado en **`{PESTANA_NOVEDADES}`** ({dias_totales} días).")
                     except Exception as e:
                         st.error(f"❌ Error al guardar en `{PESTANA_NOVEDADES}`: {e}")
+
+    # ==========================================
+    # MÓDULO 3: CONSULTA COMPLETA DE BASES DE DATOS (2 PESTAÑAS PRINCIPALES)
+    # ==========================================
+    elif modulo_activo == "📊 Consulta de Bases de Datos":
+        col_tit, col_btn = st.columns([5, 1])
+        with col_tit:
+            st.markdown(
+                "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>📊 CONSULTA GENERAL DE BASES DE DATOS</h1>",
+                unsafe_allow_html=True,
+            )
+        with col_btn:
+            st.write("")
+            if st.button("🔄 Actualizar Datos", use_container_width=True):
+                leer_pestana_df.clear()
+                st.rerun()
+
+        tab_bd_personal, tab_bd_novedades = st.tabs([
+            "🗂️ 1. BASE DE DATOS DE PERSONAL (3 PESTAÑAS)",
+            "🩺 2. PERMISOS, INCAPACIDADES Y LICENCIAS",
+        ])
+
+        # ----------------------------------------------------------------------
+        # PESTAÑA 1: VISUALIZACIÓN COMPLETA DE LAS 3 BASES DE PERSONAL
+        # ----------------------------------------------------------------------
+        with tab_bd_personal:
+            sub_tab_1, sub_tab_2, sub_tab_3 = st.tabs([
+                "👮 Plan_de_Recojo",
+                "⚓ Unidades_Agregadas",
+                "📋 Vac.Jubilacion_U.Prestados_U.Trasladados",
+            ])
+
+            def renderizar_visor_personal(nombre_hoja, key_prefix):
+                df_p = leer_pestana_df(nombre_hoja, COLUMNAS_OFICIALES)
+                if df_p.empty:
+                    st.info(f"La pestaña **{nombre_hoja}** aún no tiene registros.")
+                    return
+
+                st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+                f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
+                busqueda = f1.text_input(
+                    "🔎 Buscar por Cédula, Nombre, Apellido o Posición:",
+                    key=f"{key_prefix}_busq",
+                ).strip().upper()
+
+                ests_disp = ["TODOS"] + sorted([x for x in df_p["ESTAMENTO"].unique() if str(x).strip() != ""])
+                filtro_est = f2.selectbox("Estamento:", ests_disp, key=f"{key_prefix}_est")
+
+                centros_disp = ["TODOS"] + sorted([x for x in df_p["ASIGNADO_CENTRO"].unique() if str(x).strip() != ""])
+                filtro_cen = f3.selectbox("Centro:", centros_disp, key=f"{key_prefix}_cen")
+
+                status_disp = ["TODOS"] + sorted([x for x in df_p["ESTADO_STATUS"].unique() if str(x).strip() != ""])
+                filtro_sta = f4.selectbox("Estado / Status:", status_disp, key=f"{key_prefix}_sta")
+
+                df_filtrado = df_p.copy()
+                if busqueda:
+                    mask_b = (
+                        df_filtrado["CEDULA"].str.upper().str.contains(busqueda, na=False)
+                        | df_filtrado["NOMBRE"].str.upper().str.contains(busqueda, na=False)
+                        | df_filtrado["APELLIDO"].str.upper().str.contains(busqueda, na=False)
+                        | df_filtrado["POSIC"].str.upper().str.contains(busqueda, na=False)
+                    )
+                    df_filtrado = df_filtrado[mask_b]
+                if filtro_est != "TODOS":
+                    df_filtrado = df_filtrado[df_filtrado["ESTAMENTO"] == filtro_est]
+                if filtro_cen != "TODOS":
+                    df_filtrado = df_filtrado[df_filtrado["ASIGNADO_CENTRO"] == filtro_cen]
+                if filtro_sta != "TODOS":
+                    df_filtrado = df_filtrado[df_filtrado["ESTADO_STATUS"] == filtro_sta]
+
+                c_info, c_dl = st.columns([4, 1])
+                c_info.markdown(
+                    f"**Pestaña:** `{nombre_hoja}` · **Mostrando:** `{len(df_filtrado)}` de `{len(df_p)}` registros completos (60 columnas)"
+                )
+                c_dl.download_button(
+                    label="📥 Descargar Excel",
+                    data=convertir_df_a_excel(df_filtrado, nombre_hoja),
+                    file_name=f"{nombre_hoja}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key=f"{key_prefix}_dl",
+                )
+
+                st.dataframe(df_filtrado, use_container_width=True, height=520)
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            with sub_tab_1:
+                renderizar_visor_personal(PESTANA_PERSONAL, "recojo")
+
+            with sub_tab_2:
+                renderizar_visor_personal(PESTANA_AGREGADAS, "agregadas")
+
+            with sub_tab_3:
+                renderizar_visor_personal(PESTANA_JUB_PRES_TRAS, "jub_pres_tras")
+
+        # ----------------------------------------------------------------------
+        # PESTAÑA 2: BASE DE DATOS COMPLETA DE PERMISOS, INCAPACIDADES Y LICENCIAS
+        # ----------------------------------------------------------------------
+        with tab_bd_novedades:
+            df_nov = leer_pestana_df(PESTANA_NOVEDADES, COLUMNAS_NOVEDADES)
+            st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+
+            if df_nov.empty:
+                st.info(
+                    f"La pestaña **`{PESTANA_NOVEDADES}`** aún no tiene registros cargados. "
+                    "Puedes agregarlos desde el módulo **🩺 Permisos, Incapacidades y Licencias**."
+                )
+            else:
+                fn1, fn2, fn3, fn4 = st.columns([2, 1, 1, 1])
+                busq_nov = fn1.text_input(
+                    "🔎 Buscar por Cédula, Nombre, Apellido, Posición o ID:",
+                    key="nov_busq",
+                ).strip().upper()
+
+                tipos_disp = ["TODOS"] + sorted([x for x in df_nov["TIPO_NOVEDAD"].unique() if str(x).strip() != ""])
+                filtro_tipo_nov = fn2.selectbox("Tipo de Novedad:", tipos_disp, key="nov_tipo_f")
+
+                cen_nov_disp = ["TODOS"] + sorted([x for x in df_nov["ASIGNADO_CENTRO"].unique() if str(x).strip() != ""])
+                filtro_cen_nov = fn3.selectbox("Centro:", cen_nov_disp, key="nov_cen_f")
+
+                est_nov_disp = ["TODOS"] + sorted([x for x in df_nov["ESTADO_TRAMITE"].unique() if str(x).strip() != ""])
+                filtro_est_nov = fn4.selectbox("Estado Trámite:", est_nov_disp, key="nov_est_f")
+
+                df_nov_filt = df_nov.copy()
+                if busq_nov:
+                    mask_n = (
+                        df_nov_filt["CEDULA"].str.upper().str.contains(busq_nov, na=False)
+                        | df_nov_filt["NOMBRE"].str.upper().str.contains(busq_nov, na=False)
+                        | df_nov_filt["APELLIDO"].str.upper().str.contains(busq_nov, na=False)
+                        | df_nov_filt["POSIC"].str.upper().str.contains(busq_nov, na=False)
+                        | df_nov_filt["ID_NOVEDAD"].str.upper().str.contains(busq_nov, na=False)
+                    )
+                    df_nov_filt = df_nov_filt[mask_n]
+                if filtro_tipo_nov != "TODOS":
+                    df_nov_filt = df_nov_filt[df_nov_filt["TIPO_NOVEDAD"] == filtro_tipo_nov]
+                if filtro_cen_nov != "TODOS":
+                    df_nov_filt = df_nov_filt[df_nov_filt["ASIGNADO_CENTRO"] == filtro_cen_nov]
+                if filtro_est_nov != "TODOS":
+                    df_nov_filt = df_nov_filt[df_nov_filt["ESTADO_TRAMITE"] == filtro_est_nov]
+
+                cn_info, cn_dl = st.columns([4, 1])
+                cn_info.markdown(
+                    f"**Pestaña:** `{PESTANA_NOVEDADES}` · **Mostrando:** `{len(df_nov_filt)}` de `{len(df_nov)}` registros (27 columnas)"
+                )
+                cn_dl.download_button(
+                    label="📥 Descargar Excel",
+                    data=convertir_df_a_excel(df_nov_filt, "Permisos_Incapacidades"),
+                    file_name="Permiso_incapacidad_licencia.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="nov_dl",
+                )
+
+                st.dataframe(df_nov_filt, use_container_width=True, height=520)
+
+            st.markdown("</div>", unsafe_allow_html=True)
