@@ -344,7 +344,6 @@ def actualizar_fila_personal(nombre_pestana, indice_df, datos_actualizados, usua
         if col_name in datos_actualizados:
             fila_actual[idx_c] = datos_actualizados[col_name]
 
-    # Registrar auditoría de edición en OBSERVACION si hubo cambios
     obs_prev = str(fila_actual[32]).strip()
     nota_ed = f"EDITADO POR {limpiar_valor(usuario_actual)} ({timestamp_str})"
     if nota_ed not in obs_prev:
@@ -1183,7 +1182,7 @@ else:
                 st.markdown('<div class="neon-card">', unsafe_allow_html=True)
                 f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
                 busqueda = f1.text_input(
-                    "🔎 Buscar por Nombre, Apellido, Posición o Cédula:",
+                    "🔎 Buscar por Nombre, Apellido, Posición o Cédula (presiona Enter para editar):",
                     key=f"{key_prefix}_busq",
                 ).strip().upper()
 
@@ -1227,105 +1226,110 @@ else:
 
                 st.dataframe(df_filtrado, use_container_width=True, height=440)
 
-                # --- BLOQUE DE EDICIÓN RÁPIDA POR NOMBRE, POSICIÓN O CÉDULA ---
-                if not df_filtrado.empty:
+                # --- EL CUADRO DE EDICIÓN SOLO APARECE AL ESCRIBIR UNA CONSULTA Y DAR ENTER ---
+                # --- AL BORRAR EL TEXTO DE BÚSQUEDA, EL CUADRO DESAPARECE Y QUEDA LIMPIO ---
+                if busqueda != "":
                     st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
                     st.markdown(
                         "<h3 style='color: #00ffff;'>✏️ EDITAR REGISTRO DE LA UNIDAD</h3>",
                         unsafe_allow_html=True,
                     )
-                    indices_disp = list(df_filtrado.index)
-                    idx_sel_ed = st.selectbox(
-                        "Selecciona la unidad a editar:",
-                        indices_disp,
-                        format_func=lambda idx: (
-                            f"{df_p.loc[idx, 'RANGO']} | POSIC: {df_p.loc[idx, 'POSIC']} | "
-                            f"{df_p.loc[idx, 'NOMBRE']} {df_p.loc[idx, 'APELLIDO']} | "
-                            f"CÉD: {df_p.loc[idx, 'CEDULA']}"
-                        ),
-                        key=f"{key_prefix}_ed_sel",
-                    )
-
-                    fila_ed = df_p.loc[idx_sel_ed]
-                    with st.form(f"form_editar_{key_prefix}_{idx_sel_ed}"):
-                        e1, e2, e3, e4, e5 = st.columns(5)
-                        ed_rango = e1.text_input("RANGO", value=str(fila_ed.get("RANGO", "")))
-                        ed_posic = e2.text_input("POSIC", value=str(fila_ed.get("POSIC", "")))
-                        ed_placa = e3.text_input("PLACA_METALICA", value=str(fila_ed.get("PLACA_METALICA", "")))
-                        ed_nombre = e4.text_input("NOMBRE", value=str(fila_ed.get("NOMBRE", "")))
-                        ed_apellido = e5.text_input("APELLIDO", value=str(fila_ed.get("APELLIDO", "")))
-
-                        e6, e7, e8, e9, e10 = st.columns(5)
-                        ed_cedula = e6.text_input("CEDULA", value=str(fila_ed.get("CEDULA", "")))
-                        ed_fnac = e7.text_input("FECHA_NACIMIENTO (YYYY-MM-DD)", value=str(fila_ed.get("FECHA_NACIMIENTO", "")))
-                        ed_genero = e8.text_input("GENERO", value=str(fila_ed.get("GENERO", "")))
-                        ed_tel = e9.text_input("TELEFONO_PERSONAL", value=str(fila_ed.get("TELEFONO_PERSONAL", "")))
-                        ed_est = e10.text_input("ESTAMENTO", value=str(fila_ed.get("ESTAMENTO", "")))
-
-                        e11, e12, e13, e14, e15 = st.columns(5)
-                        ed_fing = e11.text_input("FECHA_INGRESO (YYYY-MM-DD)", value=str(fila_ed.get("FECHA_INGRESO", "")))
-                        ed_res = e12.text_input("RES_OGD_ASIG", value=str(fila_ed.get("RES_OGD_ASIG", "")))
-                        ed_centro = e13.text_input("ASIGNADO_CENTRO", value=str(fila_ed.get("ASIGNADO_CENTRO", "")))
-                        ed_depto = e14.text_input("DEPARTAMENTO", value=str(fila_ed.get("DEPARTAMENTO", "")))
-                        ed_turno = e15.text_input("TURNO", value=str(fila_ed.get("TURNO", "")))
-
-                        e16, e17, e18, e19, e20 = st.columns(5)
-                        ed_grupo = e16.text_input("GRUPO", value=str(fila_ed.get("GRUPO", "")))
-                        ed_func = e17.text_input("FUNCION", value=str(fila_ed.get("FUNCION", "")))
-                        ed_status = e18.text_input("ESTADO_STATUS", value=str(fila_ed.get("ESTADO_STATUS", "")))
-                        ed_op = e19.text_input("OPERAT_NO_OPERAT", value=str(fila_ed.get("OPERAT_NO_OPERAT", "")))
-                        ed_apto = e20.text_input("APTO_NO_APTO", value=str(fila_ed.get("APTO_NO_APTO", "")))
-
-                        e21, e22, e23, e24 = st.columns(4)
-                        ed_hm = e21.text_input("HIJOS_M", value=str(fila_ed.get("HIJOS_M", "")))
-                        ed_hf = e22.text_input("HIJAS_F", value=str(fila_ed.get("HIJAS_F", "")))
-                        ed_prov = e23.text_input("PROVINCIA", value=str(fila_ed.get("PROVINCIA", "")))
-                        ed_obs = e24.text_input("OBSERVACION", value=str(fila_ed.get("OBSERVACION", "")))
-
-                        guardar_ed = st.form_submit_button(
-                            f"💾 Guardar Cambios en {nombre_hoja}",
-                            use_container_width=True,
+                    if df_filtrado.empty:
+                        st.warning("⚠️ No se encontró ninguna unidad con esa consulta para editar.")
+                    else:
+                        indices_disp = list(df_filtrado.index)
+                        idx_sel_ed = st.selectbox(
+                            "Selecciona la unidad a editar:",
+                            indices_disp,
+                            format_func=lambda idx: (
+                                f"{df_p.loc[idx, 'RANGO']} | POSIC: {df_p.loc[idx, 'POSIC']} | "
+                                f"{df_p.loc[idx, 'NOMBRE']} {df_p.loc[idx, 'APELLIDO']} | "
+                                f"CÉD: {df_p.loc[idx, 'CEDULA']}"
+                            ),
+                            key=f"{key_prefix}_ed_sel_{busqueda}",
                         )
 
-                        if guardar_ed:
-                            try:
-                                cambios = {
-                                    "RANGO": limpiar_valor(ed_rango),
-                                    "POSIC": limpiar_valor(ed_posic),
-                                    "PLACA_METALICA": limpiar_valor(ed_placa),
-                                    "NOMBRE": limpiar_valor(ed_nombre),
-                                    "APELLIDO": limpiar_valor(ed_apellido),
-                                    "CEDULA": limpiar_valor(ed_cedula),
-                                    "FECHA_NACIMIENTO": limpiar_valor(ed_fnac),
-                                    "GENERO": limpiar_valor(ed_genero),
-                                    "TELEFONO_PERSONAL": limpiar_valor(ed_tel),
-                                    "ESTAMENTO": limpiar_valor(ed_est),
-                                    "FECHA_INGRESO": limpiar_valor(ed_fing),
-                                    "RES_OGD_ASIG": limpiar_valor(ed_res),
-                                    "ASIGNADO_CENTRO": limpiar_valor(ed_centro),
-                                    "DEPARTAMENTO": limpiar_valor(ed_depto),
-                                    "TURNO": limpiar_valor(ed_turno),
-                                    "GRUPO": limpiar_valor(ed_grupo),
-                                    "FUNCION": limpiar_valor(ed_func),
-                                    "ESTADO_STATUS": limpiar_valor(ed_status),
-                                    "OPERAT_NO_OPERAT": limpiar_valor(ed_op),
-                                    "APTO_NO_APTO": limpiar_valor(ed_apto),
-                                    "HIJOS_M": limpiar_valor(ed_hm),
-                                    "HIJAS_F": limpiar_valor(ed_hf),
-                                    "PROVINCIA": limpiar_valor(ed_prov),
-                                    "OBSERVACION": limpiar_valor(ed_obs),
-                                }
-                                actualizar_fila_personal(
-                                    nombre_pestana=nombre_hoja,
-                                    indice_df=int(idx_sel_ed),
-                                    datos_actualizados=cambios,
-                                    usuario_actual=st.session_state.get("usuario_actual", "ADMINISTRADOR"),
-                                    timestamp_str=timestamp_actual,
-                                )
-                                st.success(f"✔️ Datos actualizados en **`{nombre_hoja}`** para **{limpiar_valor(ed_nombre)} {limpiar_valor(ed_apellido)}**.")
-                                st.rerun()
-                            except Exception as e_err:
-                                st.error(f"❌ Error al actualizar el registro: {e_err}")
+                        fila_ed = df_p.loc[idx_sel_ed]
+                        form_key = f"form_editar_{key_prefix}_{idx_sel_ed}_{busqueda}"
+                        with st.form(form_key):
+                            e1, e2, e3, e4, e5 = st.columns(5)
+                            ed_rango = e1.text_input("RANGO", value=str(fila_ed.get("RANGO", "")))
+                            ed_posic = e2.text_input("POSIC", value=str(fila_ed.get("POSIC", "")))
+                            ed_placa = e3.text_input("PLACA_METALICA", value=str(fila_ed.get("PLACA_METALICA", "")))
+                            ed_nombre = e4.text_input("NOMBRE", value=str(fila_ed.get("NOMBRE", "")))
+                            ed_apellido = e5.text_input("APELLIDO", value=str(fila_ed.get("APELLIDO", "")))
+
+                            e6, e7, e8, e9, e10 = st.columns(5)
+                            ed_cedula = e6.text_input("CEDULA", value=str(fila_ed.get("CEDULA", "")))
+                            ed_fnac = e7.text_input("FECHA_NACIMIENTO (YYYY-MM-DD)", value=str(fila_ed.get("FECHA_NACIMIENTO", "")))
+                            ed_genero = e8.text_input("GENERO", value=str(fila_ed.get("GENERO", "")))
+                            ed_tel = e9.text_input("TELEFONO_PERSONAL", value=str(fila_ed.get("TELEFONO_PERSONAL", "")))
+                            ed_est = e10.text_input("ESTAMENTO", value=str(fila_ed.get("ESTAMENTO", "")))
+
+                            e11, e12, e13, e14, e15 = st.columns(5)
+                            ed_fing = e11.text_input("FECHA_INGRESO (YYYY-MM-DD)", value=str(fila_ed.get("FECHA_INGRESO", "")))
+                            ed_res = e12.text_input("RES_OGD_ASIG", value=str(fila_ed.get("RES_OGD_ASIG", "")))
+                            ed_centro = e13.text_input("ASIGNADO_CENTRO", value=str(fila_ed.get("ASIGNADO_CENTRO", "")))
+                            ed_depto = e14.text_input("DEPARTAMENTO", value=str(fila_ed.get("DEPARTAMENTO", "")))
+                            ed_turno = e15.text_input("TURNO", value=str(fila_ed.get("TURNO", "")))
+
+                            e16, e17, e18, e19, e20 = st.columns(5)
+                            ed_grupo = e16.text_input("GRUPO", value=str(fila_ed.get("GRUPO", "")))
+                            ed_func = e17.text_input("FUNCION", value=str(fila_ed.get("FUNCION", "")))
+                            ed_status = e18.text_input("ESTADO_STATUS", value=str(fila_ed.get("ESTADO_STATUS", "")))
+                            ed_op = e19.text_input("OPERAT_NO_OPERAT", value=str(fila_ed.get("OPERAT_NO_OPERAT", "")))
+                            ed_apto = e20.text_input("APTO_NO_APTO", value=str(fila_ed.get("APTO_NO_APTO", "")))
+
+                            e21, e22, e23, e24 = st.columns(4)
+                            ed_hm = e21.text_input("HIJOS_M", value=str(fila_ed.get("HIJOS_M", "")))
+                            ed_hf = e22.text_input("HIJAS_F", value=str(fila_ed.get("HIJAS_F", "")))
+                            ed_prov = e23.text_input("PROVINCIA", value=str(fila_ed.get("PROVINCIA", "")))
+                            ed_obs = e24.text_input("OBSERVACION", value=str(fila_ed.get("OBSERVACION", "")))
+
+                            guardar_ed = st.form_submit_button(
+                                f"💾 Guardar Cambios en {nombre_hoja}",
+                                use_container_width=True,
+                            )
+
+                            if guardar_ed:
+                                try:
+                                    cambios = {
+                                        "RANGO": limpiar_valor(ed_rango),
+                                        "POSIC": limpiar_valor(ed_posic),
+                                        "PLACA_METALICA": limpiar_valor(ed_placa),
+                                        "NOMBRE": limpiar_valor(ed_nombre),
+                                        "APELLIDO": limpiar_valor(ed_apellido),
+                                        "CEDULA": limpiar_valor(ed_cedula),
+                                        "FECHA_NACIMIENTO": limpiar_valor(ed_fnac),
+                                        "GENERO": limpiar_valor(ed_genero),
+                                        "TELEFONO_PERSONAL": limpiar_valor(ed_tel),
+                                        "ESTAMENTO": limpiar_valor(ed_est),
+                                        "FECHA_INGRESO": limpiar_valor(ed_fing),
+                                        "RES_OGD_ASIG": limpiar_valor(ed_res),
+                                        "ASIGNADO_CENTRO": limpiar_valor(ed_centro),
+                                        "DEPARTAMENTO": limpiar_valor(ed_depto),
+                                        "TURNO": limpiar_valor(ed_turno),
+                                        "GRUPO": limpiar_valor(ed_grupo),
+                                        "FUNCION": limpiar_valor(ed_func),
+                                        "ESTADO_STATUS": limpiar_valor(ed_status),
+                                        "OPERAT_NO_OPERAT": limpiar_valor(ed_op),
+                                        "APTO_NO_APTO": limpiar_valor(ed_apto),
+                                        "HIJOS_M": limpiar_valor(ed_hm),
+                                        "HIJAS_F": limpiar_valor(ed_hf),
+                                        "PROVINCIA": limpiar_valor(ed_prov),
+                                        "OBSERVACION": limpiar_valor(ed_obs),
+                                    }
+                                    actualizar_fila_personal(
+                                        nombre_pestana=nombre_hoja,
+                                        indice_df=int(idx_sel_ed),
+                                        datos_actualizados=cambios,
+                                        usuario_actual=st.session_state.get("usuario_actual", "ADMINISTRADOR"),
+                                        timestamp_str=timestamp_actual,
+                                    )
+                                    st.success(f"✔️ Datos actualizados en **`{nombre_hoja}`** para **{limpiar_valor(ed_nombre)} {limpiar_valor(ed_apellido)}**.")
+                                    st.rerun()
+                                except Exception as e_err:
+                                    st.error(f"❌ Error al actualizar el registro: {e_err}")
 
                 st.markdown("</div>", unsafe_allow_html=True)
 
