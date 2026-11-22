@@ -4,7 +4,7 @@ import glob
 import base64
 import re
 from io import BytesIO
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import pytz
 import gspread
 from google.oauth2.service_account import Credentials
@@ -166,7 +166,6 @@ PESTANAS_UNIDADES = [
     PESTANA_JUB_PRES_TRAS,
 ]
 
-# Pestañas que siempre deben mantenerse ordenadas por jerarquía de RANGO
 PESTANAS_ORDENADAS_RANGO = {
     PESTANA_PERSONAL,
     PESTANA_AGREGADAS,
@@ -200,7 +199,6 @@ COLUMNAS_NOVEDADES = [
     "OBSERVACION",
 ]
 
-# Jerarquía oficial de rangos policiales / estamentales (menor número = mayor jerarquía)
 JERARQUIA_RANGOS = {
     "COMISIONADO": 1,
     "COMISIONADO (A)": 1,
@@ -237,6 +235,26 @@ JERARQUIA_RANGOS = {
     "M.N.J": 13,
     "MNJ": 13,
 }
+
+def formulas_fila_personal(num_fila):
+    """Devuelve fórmulas dinámicas de Google Sheets con TODAY() para EDAD, ANOS_SERVICIOS y TOTAL_HIJOS."""
+    f_edad = f'=IF(ISBLANK(I{num_fila}),"",DATEDIF(I{num_fila},TODAY(),"Y"))'
+    f_serv = f'=IF(ISBLANK(P{num_fila}),"",DATEDIF(P{num_fila},TODAY(),"Y"))'
+    f_hijos = f'=IF(AND(ISBLANK(AY{num_fila}),ISBLANK(AZ{num_fila})),"",SUM(AY{num_fila}:AZ{num_fila}))'
+    return f_edad, f_serv, f_hijos
+
+def formulas_fila_novedad(num_fila):
+    """Devuelve fórmulas dinámicas de Google Sheets con TODAY() para días totales, restantes y alerta de reincorporación."""
+    f_tot = f'=IF(OR(ISBLANK(R{num_fila}),ISBLANK(S{num_fila})),"",S{num_fila}-R{num_fila}+1)'
+    f_rest = f'=IF(ISBLANK(S{num_fila}),"",MAX(0,S{num_fila}-TODAY()))'
+    f_alerta = (
+        f'=IF(V{num_fila}="","",IF(V{num_fila}="FINALIZADO","REINCORPORADO",'
+        f'IF(V{num_fila}="ANULADO","ANULADO",IF(ISBLANK(S{num_fila}),"",'
+        f'IF(S{num_fila}<TODAY(),"VENCIDO · DEBÍA REINCORPORARSE EL "&TEXT(S{num_fila}+1,"yyyy-mm-dd"),'
+        f'IF(S{num_fila}-TODAY()<=2,"PRÓXIMO A REINCORPORAR ("&MAX(0,S{num_fila}-TODAY())&" DÍAS REST.) · REINCORPORA EL "&TEXT(S{num_fila}+1,"yyyy-mm-dd"),'
+        f'"EN CURSO · LLEVA "&MAX(1,TODAY()-R{num_fila}+1)&" DÍA(S), QUEDAN "&(S{num_fila}-TODAY())&" · REINCORPORA EL "&TEXT(S{num_fila}+1,"yyyy-mm-dd")))))))'
+    )
+    return f_tot, f_rest, f_alerta
 
 def clave_orden_rango_posic(fila):
     rango_txt = re.sub(r"\s+", " ", str(fila[2]).strip().upper())
@@ -275,8 +293,8 @@ def obtener_o_crear_worksheet(nombre_pestana, columnas_hdr=None):
 def ordenar_pestana_por_rango(nombre_pestana):
     """
     Reordena por jerarquía de RANGO + POSIC las pestañas activas de centros
-    (Plan_de_Recojo y Unidades_Agregadas) y restablece las fórmulas dinámicas
-    de EDAD (J), ANOS_SERVICIOS (Q) y TOTAL_HIJOS (BA) en cada fila.
+    (Plan_de_Recojo y Unidades_Agregadas) y mantiene las fórmulas dinámicas
+    con TODAY() en EDAD (J), ANOS_SERVICIOS (Q) y TOTAL_HIJOS (BA).
     No modifica Vac.Jubilacion_U.Prestados_U.Trasladados.
     """
     if nombre_pestana not in PESTANAS_ORDENADAS_RANGO:
@@ -297,11 +315,11 @@ def ordenar_pestana_por_rango(nombre_pestana):
 
     filas_ordenadas = sorted(filas, key=clave_orden_rango_posic)
 
-    # Reaplicar fórmulas dinámicas por fila (2..N+1) en columnas J (EDAD), Q (ANOS_SERVICIOS) y BA (TOTAL_HIJOS)
     for idx, fila in enumerate(filas_ordenadas, start=2):
-        fila[9] = f'=IF(ISBLANK(I{idx}),"",DATEDIF(I{idx},TODAY(),"Y"))'
-        fila[16] = f'=IF(ISBLANK(P{idx}),"",DATEDIF(P{idx},TODAY(),"Y"))'
-        fila[52] = f'=IF(AND(ISBLANK(AY{idx}),ISBLANK(AZ{idx})),"",SUM(AY{idx}:AZ{idx}))'
+        f_edad, f_serv, f_hijos = formulas_fila_personal(idx)
+        fila[9] = f_edad
+        fila[16] = f_serv
+        fila[52] = f_hijos
 
     matriz_final = [encabezado] + filas_ordenadas
     ws.clear()
@@ -321,7 +339,40 @@ def leer_pestana_df(nombre_pestana, columnas_esperadas):
             f[:num_cols] + [""] * max(0, num_cols - len(f))
             for f in filas
         ]
-        return pd.DataFrame(filas_norm, columns=encabezados)
+        df = pd.DataFrame(filas_norm, columns=encabezados)
+
+        # Recalcular en tiempo real contra la fecha de hoy en Panamá para visualización instantánea
+        hoy_live = datetime.now(pytz.timezone("America/Panama")).date()
+        if nombre_pestana in PESTANAS_UNIDADES and not df.empty:
+            if "FECHA_NACIMIENTO" in df.columns and "EDAD" in df.columns:
+                df["EDAD"] = df["FECHA_NACIMIENTO"].apply(
+                    lambda v: str(calcular_anios(parsear_fecha_simple(v), hoy_live))
+                    if parsear_fecha_simple(v) else ""
+                )
+            if "FECHA_INGRESO" in df.columns and "ANOS_SERVICIOS" in df.columns:
+                df["ANOS_SERVICIOS"] = df["FECHA_INGRESO"].apply(
+                    lambda v: str(calcular_anios(parsear_fecha_simple(v), hoy_live))
+                    if parsear_fecha_simple(v) else ""
+                )
+            if "HIJOS_M" in df.columns and "HIJAS_F" in df.columns and "TOTAL_HIJOS" in df.columns:
+                df["TOTAL_HIJOS"] = [
+                    str(calcular_hijos_fila(m, f))
+                    for m, f in zip(df["HIJOS_M"], df["HIJAS_F"])
+                ]
+        elif nombre_pestana == PESTANA_NOVEDADES and not df.empty:
+            for idx_r in range(len(df)):
+                f_ini = parsear_fecha_simple(df.loc[idx_r, "FECHA_INICIO"])
+                f_fin = parsear_fecha_simple(df.loc[idx_r, "FECHA_FIN"])
+                est_t = df.loc[idx_r, "ESTADO_TRAMITE"]
+                if f_ini and f_fin and f_fin >= f_ini:
+                    df.loc[idx_r, "DIAS_TOTALES"] = str((f_fin - f_ini).days + 1)
+                if f_fin:
+                    df.loc[idx_r, "DIAS_RESTANTES"] = str(max(0, (f_fin - hoy_live).days))
+                df.loc[idx_r, "ALERTA_REINTEGRO"] = calcular_alerta_reintegro(
+                    f_ini, f_fin, est_t, hoy_live
+                )
+
+        return df
     except Exception as e:
         st.error(f"❌ Error al leer la pestaña `{nombre_pestana}`: {e}")
         return pd.DataFrame(columns=columnas_esperadas)
@@ -382,12 +433,16 @@ def mover_unidad_entre_pestanas(
     obs_previa = str(fila_60[mapa_cols["OBSERVACION"]]).strip()
     fila_60[mapa_cols["OBSERVACION"]] = f"{obs_previa} | {nota_mov}" if obs_previa else nota_mov
 
-    # 1. Agregar a pestaña destino y eliminar de pestaña origen
+    # Asignar fórmulas dinámicas con TODAY() según la fila destino
+    fila_dest_num = len(ws_dest.get_all_values()) + 1
+    f_edad, f_serv, f_hijos = formulas_fila_personal(fila_dest_num)
+    fila_60[mapa_cols["EDAD"]] = f_edad
+    fila_60[mapa_cols["ANOS_SERVICIOS"]] = f_serv
+    fila_60[mapa_cols["TOTAL_HIJOS"]] = f_hijos
+
     ws_dest.append_row(fila_60, value_input_option="USER_ENTERED")
     ws_orig.delete_rows(fila_sheet_num)
 
-    # 2. Mantener ordenadas por RANGO las pestañas activas afectadas (Plan_de_Recojo / Unidades_Agregadas)
-    #    La tercera pestaña (Vac.Jubilacion_U.Prestados_U.Trasladados) conserva su orden cronológico/resolución.
     if pestana_destino in PESTANAS_ORDENADAS_RANGO:
         ordenar_pestana_por_rango(pestana_destino)
     if pestana_origen in PESTANAS_ORDENADAS_RANGO:
@@ -423,6 +478,14 @@ def limpiar_valor(val):
         s = s[:-2]
     return s.upper()
 
+def parsear_fecha_simple(val):
+    if es_placeholder_vacio(val):
+        return None
+    if isinstance(val, (datetime, date, pd.Timestamp)):
+        return val.date() if isinstance(val, datetime) else val
+    dt = pd.to_datetime(str(val).strip(), errors="coerce", dayfirst=True)
+    return dt.date() if pd.notna(dt) else None
+
 def calcular_anios(fecha_ref, hoy):
     if not fecha_ref:
         return ""
@@ -437,7 +500,13 @@ def calcular_hijos_fila(m_val, f_val):
     f_num = int(float(f_txt)) if re.fullmatch(r"\d+(\.\d+)?", f_txt) else 0
     return m_num + f_num
 
-def calcular_alerta_reintegro(fecha_fin, estado_tramite, hoy):
+def calcular_alerta_reintegro(fecha_inicio, fecha_fin, estado_tramite, hoy):
+    """
+    Calcula dinámicamente según la fecha de hoy:
+    - Cuántos días lleva de permiso/incapacidad/licencia
+    - Cuántos días le quedan
+    - Cuándo debe reincorporarse (FECHA_FIN + 1 día)
+    """
     est = limpiar_valor(estado_tramite)
     if est == "FINALIZADO":
         return "REINCORPORADO"
@@ -445,11 +514,26 @@ def calcular_alerta_reintegro(fecha_fin, estado_tramite, hoy):
         return "ANULADO"
     if not fecha_fin:
         return ""
+
+    fecha_reintegro = fecha_fin + timedelta(days=1)
+    reintegro_str = fecha_reintegro.strftime("%Y-%m-%d")
+
     if fecha_fin < hoy:
-        return "VENCIDO / VERIFICAR"
-    if (fecha_fin - hoy).days <= 2:
-        return "REINCORPORA PRONTO"
-    return "EN CURSO"
+        dias_atraso = (hoy - fecha_fin).days
+        return f"VENCIDO ({dias_atraso} DÍA(S) DE ATRASO) · DEBÍA REINCORPORARSE EL {reintegro_str}"
+
+    dias_lleva = max(1, (hoy - fecha_inicio).days + 1) if fecha_inicio and hoy >= fecha_inicio else 0
+    dias_quedan = (fecha_fin - hoy).days
+
+    if dias_quedan <= 2:
+        return (
+            f"PRÓXIMO A REINCORPORAR · LLEVA {dias_lleva} DÍA(S), "
+            f"QUEDAN {dias_quedan} · REINCORPORA EL {reintegro_str}"
+        )
+    return (
+        f"EN CURSO · LLEVA {dias_lleva} DÍA(S), "
+        f"QUEDAN {dias_quedan} · REINCORPORA EL {reintegro_str}"
+    )
 
 # --- 2. ESTADOS DE SESIÓN ---
 if "autenticado" not in st.session_state:
@@ -696,10 +780,11 @@ else:
                         st.error("❌ Complete los campos obligatorios de la Pestaña 1 (Rango, Nombre, Apellido y Cédula).")
                     else:
                         try:
+                            hoja_bd = obtener_o_crear_worksheet(PESTANA_PERSONAL, COLUMNAS_OFICIALES)
+                            siguiente_fila = len(hoja_bd.get_all_values()) + 1
+                            f_edad_dyn, f_serv_dyn, f_hijos_dyn = formulas_fila_personal(siguiente_fila)
+
                             usuario_reg = st.session_state.get("usuario_actual", "DESCONOCIDO")
-                            edad_calc = calcular_anios(fecha_naci, hoy_pa)
-                            anos_serv_calc = calcular_anios(fecha_ingreso, hoy_pa)
-                            total_hijos_calc = calcular_hijos_fila(hijos_m, hijas_f)
                             f_diag_str = str(fecha_diagnostico) if tiene_diagnostico else ""
                             f_eval_str = str(f_prox_evaluacion) if tiene_diagnostico else ""
 
@@ -713,14 +798,14 @@ else:
                                 limpiar_valor(apellido),
                                 limpiar_valor(cedula),
                                 str(fecha_naci),
-                                edad_calc,
+                                f_edad_dyn,
                                 limpiar_valor(genero),
                                 limpiar_valor(telefono_personal),
                                 limpiar_valor(estamento),
                                 limpiar_valor(num_promocion),
                                 limpiar_valor(descripcion_promo),
                                 str(fecha_ingreso),
-                                anos_serv_calc,
+                                f_serv_dyn,
                                 limpiar_valor(res_ogd),
                                 limpiar_valor(asig_trasl),
                                 limpiar_valor(direc_depen),
@@ -756,7 +841,7 @@ else:
                                 limpiar_valor(universidad),
                                 int(hijos_m) if int(hijos_m) > 0 else "",
                                 int(hijas_f) if int(hijas_f) > 0 else "",
-                                total_hijos_calc,
+                                f_hijos_dyn,
                                 limpiar_valor(talla_camisa),
                                 limpiar_valor(talla_pantalon),
                                 limpiar_valor(talla_sueter),
@@ -766,7 +851,6 @@ else:
                                 limpiar_valor(talla_correa),
                             ]
 
-                            hoja_bd = obtener_o_crear_worksheet(PESTANA_PERSONAL, COLUMNAS_OFICIALES)
                             hoja_bd.append_row(nueva_fila, value_input_option="USER_ENTERED")
                             ordenar_pestana_por_rango(PESTANA_PERSONAL)
                             leer_pestana_df.clear()
@@ -901,13 +985,47 @@ else:
         st.markdown("</div>", unsafe_allow_html=True)
 
     # ==========================================
-    # MÓDULO 3: PERMISOS, INCAPACIDADES Y LICENCIAS (REGISTRO INDIVIDUAL)
+    # MÓDULO 3: PERMISOS, INCAPACIDADES Y LICENCIAS (AUTOMATIZADO CON ALERTAS)
     # ==========================================
     elif modulo_activo == "🩺 Permisos, Incapacidades y Licencias":
         st.markdown(
             "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>🩺 CONTROL DE PERMISOS, INCAPACIDADES Y LICENCIAS</h1>",
             unsafe_allow_html=True,
         )
+
+        # Panel automático de alertas y seguimiento diario de novedades vigentes
+        df_nov_live = leer_pestana_df(PESTANA_NOVEDADES, COLUMNAS_NOVEDADES)
+        if not df_nov_live.empty:
+            vigentes_df = df_nov_live[
+                df_nov_live["ESTADO_TRAMITE"].str.upper().isin(["VIGENTE", "PRORROGADO"])
+            ].copy()
+
+            if not vigentes_df.empty:
+                st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+                st.markdown(
+                    "<h3 style='color: #00ffff; margin-top: 0;'>🔔 ALERTAS AUTOMÁTICAS DE REINCORPORACIÓN Y DÍAS TRANSCURRIDOS</h3>",
+                    unsafe_allow_html=True,
+                )
+                for _, r_v in vigentes_df.iterrows():
+                    f_ini_v = parsear_fecha_simple(r_v.get("FECHA_INICIO", ""))
+                    f_fin_v = parsear_fecha_simple(r_v.get("FECHA_FIN", ""))
+                    msg_alerta = calcular_alerta_reintegro(
+                        f_ini_v, f_fin_v, r_v.get("ESTADO_TRAMITE", ""), hoy_pa
+                    )
+                    etiqueta_unidad = (
+                        f"**{r_v.get('ID_NOVEDAD', '')}** | {r_v.get('RANGO', '')} "
+                        f"**{r_v.get('NOMBRE', '')} {r_v.get('APELLIDO', '')}** "
+                        f"(Céd: `{r_v.get('CEDULA', '')}` · {r_v.get('ASIGNADO_CENTRO', '')}) — "
+                        f"**{r_v.get('TIPO_NOVEDAD', '')}**: {msg_alerta}"
+                    )
+                    if "VENCIDO" in msg_alerta:
+                        st.error(f"🚨 {etiqueta_unidad}")
+                    elif "PRÓXIMO A REINCORPORAR" in msg_alerta:
+                        st.warning(f"⚠️ {etiqueta_unidad}")
+                    else:
+                        st.info(f"📅 {etiqueta_unidad}")
+                st.markdown("</div>", unsafe_allow_html=True)
+                st.write("")
 
         with st.form("form_novedad_gerencial", clear_on_submit=True):
             st.markdown("<h3 style='color: #00d4ff;'>1. Identificación de la Unidad</h3>", unsafe_allow_html=True)
@@ -956,12 +1074,13 @@ else:
                     try:
                         ws_nov = obtener_o_crear_worksheet(PESTANA_NOVEDADES, COLUMNAS_NOVEDADES)
                         filas_existentes = len(ws_nov.get_all_values())
+                        fila_destino_nov = filas_existentes + 1
                         correlativo = max(1, filas_existentes)
                         id_nov = f"NOV-{hoy_pa.year}-{correlativo:03d}"
 
-                        dias_totales = int((nov_f_fin - nov_f_inicio).days + 1)
-                        dias_restantes = int(max(0, (nov_f_fin - hoy_pa).days))
-                        alerta_reint = calcular_alerta_reintegro(nov_f_fin, nov_estado, hoy_pa)
+                        # Fórmulas dinámicas con TODAY() en Google Sheets para que se actualicen cada día solas
+                        f_tot_nov, f_rest_nov, f_alerta_nov = formulas_fila_novedad(fila_destino_nov)
+                        alerta_live = calcular_alerta_reintegro(nov_f_inicio, nov_f_fin, nov_estado, hoy_pa)
                         usuario_reg = st.session_state.get("usuario_actual", "ADMINISTRADOR")
 
                         fila_nov = [
@@ -984,10 +1103,10 @@ else:
                             limpiar_valor(nov_subtipo),
                             str(nov_f_inicio),
                             str(nov_f_fin),
-                            dias_totales,
-                            dias_restantes,
+                            f_tot_nov,
+                            f_rest_nov,
                             limpiar_valor(nov_estado),
-                            alerta_reint,
+                            f_alerta_nov,
                             limpiar_valor(nov_doc),
                             limpiar_valor(nov_entidad),
                             limpiar_valor(nov_autorizado),
@@ -996,7 +1115,7 @@ else:
 
                         ws_nov.append_row(fila_nov, value_input_option="USER_ENTERED")
                         leer_pestana_df.clear()
-                        st.success(f"✔️ Registro **{id_nov}** ({limpiar_valor(nov_tipo)}) guardado en **`{PESTANA_NOVEDADES}`** ({dias_totales} días).")
+                        st.success(f"✔️ Registro **{id_nov}** ({limpiar_valor(nov_tipo)}) guardado en **`{PESTANA_NOVEDADES}`**. Estado automático: **{alerta_live}**")
                     except Exception as e:
                         st.error(f"❌ Error al guardar en `{PESTANA_NOVEDADES}`: {e}")
 
