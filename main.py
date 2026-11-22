@@ -246,6 +246,156 @@ JERARQUIA_RANGOS = {
     "MNJ": 13,
 }
 
+# --- CONSTANTES Y MAPEOS DEL DASHBOARD EJECUTIVO DINÁMICO ---
+DASH_CENTROS_OFICIALES = [
+    "CON", "CORCOL", "COMCH", "COMDA", "COMAR", "COMSAM", "COMCHEP", "CEVIBO",
+]
+DASH_ESTAMENTOS_OFICIALES = ["PNP", "SENAN", "SENAFRONT", "MINSEG", "MNJ"]
+DASH_RANGOS_OFICIALES = [
+    "COMISIONADO", "SUBCOMISIONADO", "MAYOR", "CAPITÁN", "TENIENTE",
+    "SUBTENIENTE", "SARGENTO 1º", "SARGENTO 2º", "CABO 1º", "CABO 2º",
+    "AGENTE", "MINSEG", "MNJ",
+]
+
+DASH_MAPA_CENTROS = {
+    "CON": "CON",
+    "C.O.N": "CON",
+    "C.O.N.": "CON",
+    "CORCOL": "CORCOL",
+    "COR/COL": "CORCOL",
+    "COR-COLÓN": "CORCOL",
+    "COR-COLON": "CORCOL",
+    "COMCH": "COMCH",
+    "COM/CH": "COMCH",
+    "COM CH": "COMCH",
+    "COMDA": "COMDA",
+    "COM/DA": "COMDA",
+    "COM DA": "COMDA",
+    "COMAR": "COMAR",
+    "COM/AR": "COMAR",
+    "COM AR": "COMAR",
+    "COMSAM": "COMSAM",
+    "COM/SAM": "COMSAM",
+    "COM SAM": "COMSAM",
+    "COMCHEP": "COMCHEP",
+    "COM/CHEP": "COMCHEP",
+    "COM CHEP": "COMCHEP",
+    "CEVIBO": "CEVIBO",
+    "CE/VIBO": "CEVIBO",
+    "CEVI/BO": "CEVIBO",
+}
+
+DASH_MAPA_ESTAMENTOS = {
+    "P.N": "PNP",
+    "P.N.": "PNP",
+    "PN": "PNP",
+    "PNP": "PNP",
+    "POLICIA NACIONAL": "PNP",
+    "POLICÍA NACIONAL": "PNP",
+    "SENAN": "SENAN",
+    "SENAFRONT": "SENAFRONT",
+    "SNFR": "SENAFRONT",
+    "S.N.F": "SENAFRONT",
+    "S.N.F.": "SENAFRONT",
+    "MINSEG": "MINSEG",
+    "MNJ": "MNJ",
+    "M.N.J": "MNJ",
+    "M.N.J.": "MNJ",
+}
+
+DASH_MAPA_RANGOS = {
+    "COMISIONADO": "COMISIONADO",
+    "COMISIONADO (A)": "COMISIONADO",
+    "COMISIONADA": "COMISIONADO",
+    "COM.": "COMISIONADO",
+    "SUBCOMISIONADO": "SUBCOMISIONADO",
+    "SUBCOMISIONADA": "SUBCOMISIONADO",
+    "SUBCOM.": "SUBCOMISIONADO",
+    "SUBCOM": "SUBCOMISIONADO",
+    "MAYOR": "MAYOR",
+    "CAPITÁN": "CAPITÁN",
+    "CAPITAN": "CAPITÁN",
+    "CAP.": "CAPITÁN",
+    "TENIENTE": "TENIENTE",
+    "TTE.": "TENIENTE",
+    "SUBTENIENTE": "SUBTENIENTE",
+    "SUBTTE.": "SUBTENIENTE",
+    "SARGENTO 1º": "SARGENTO 1º",
+    "SARGENTO 1°": "SARGENTO 1º",
+    "SARGENTO 1RO": "SARGENTO 1º",
+    "SARGENTO PRIMERO": "SARGENTO 1º",
+    "SGTO 1º": "SARGENTO 1º",
+    "SGTO 1°": "SARGENTO 1º",
+    "SARGENTO 2º": "SARGENTO 2º",
+    "SARGENTO 2°": "SARGENTO 2º",
+    "SARGENTO 2DO": "SARGENTO 2º",
+    "SARGENTO SEGUNDO": "SARGENTO 2º",
+    "SGTO 2º": "SARGENTO 2º",
+    "SGTO 2°": "SARGENTO 2º",
+    "CABO 1º": "CABO 1º",
+    "CABO 1°": "CABO 1º",
+    "CABO 1RO": "CABO 1º",
+    "CABO PRIMERO": "CABO 1º",
+    "CABO 2º": "CABO 2º",
+    "CABO 2°": "CABO 2º",
+    "CABO 2DO": "CABO 2º",
+    "CABO SEGUNDO": "CABO 2º",
+    "AGENTE": "AGENTE",
+    "MINSEG": "MINSEG",
+    "MNJ": "MNJ",
+    "M.N.J": "MNJ",
+    "M.N.J.": "MNJ",
+}
+
+def _dash_norm_txt(val):
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    return " ".join(str(val).strip().upper().split())
+
+def _normalizar_base_dashboard(df_recojo, df_agregadas):
+    frames = []
+    for df_src in (df_recojo, df_agregadas):
+        if df_src is not None and not df_src.empty:
+            frames.append(df_src.copy())
+
+    if not frames:
+        return pd.DataFrame(
+            columns=["CENTRO_NORM", "ESTAMENTO_NORM", "RANGO_NORM", "OPERAT_NORM"]
+        )
+
+    df = pd.concat(frames, ignore_index=True)
+
+    col_centro = "ASIGNADO_CENTRO" if "ASIGNADO_CENTRO" in df.columns else None
+    col_est = "ESTAMENTO" if "ESTAMENTO" in df.columns else None
+    col_rango = "RANGO" if "RANGO" in df.columns else None
+    col_op = "OPERAT_NO_OPERAT" if "OPERAT_NO_OPERAT" in df.columns else None
+
+    df["CENTRO_NORM"] = (
+        df[col_centro].apply(lambda x: DASH_MAPA_CENTROS.get(_dash_norm_txt(x), _dash_norm_txt(x).replace("/", "")))
+        if col_centro
+        else ""
+    )
+    df["ESTAMENTO_NORM"] = (
+        df[col_est].apply(lambda x: DASH_MAPA_ESTAMENTOS.get(_dash_norm_txt(x), _dash_norm_txt(x)))
+        if col_est
+        else ""
+    )
+
+    def _mapear_rango_fila(row):
+        r_raw = _dash_norm_txt(row[col_rango]) if col_rango else ""
+        r_norm = DASH_MAPA_RANGOS.get(r_raw, r_raw)
+        if r_norm in DASH_RANGOS_OFICIALES:
+            return r_norm
+        est_n = row["ESTAMENTO_NORM"]
+        if est_n in ("MINSEG", "MNJ"):
+            return est_n
+        return r_norm
+
+    df["RANGO_NORM"] = df.apply(_mapear_rango_fila, axis=1)
+    df["OPERAT_NORM"] = df[col_op].apply(_dash_norm_txt) if col_op else ""
+
+    return df[df["CENTRO_NORM"].isin(DASH_CENTROS_OFICIALES)].copy()
+
 def formulas_fila_personal(num_fila):
     """Devuelve fórmulas dinámicas de Google Sheets con TODAY() para EDAD, ANOS_SERVICIOS y TOTAL_HIJOS."""
     f_edad = f'=IF(ISBLANK(I{num_fila}),"",DATEDIF(I{num_fila},TODAY(),"Y"))'
@@ -829,12 +979,14 @@ else:
         modulo_activo = st.radio(
             "Seleccione un módulo:",
             [
+                "📈 Dashboard Ejecutivo",
                 "➕ Registro Individual",
                 "🔄 Movimiento de Unidades",
                 "🩺 Permisos, Incapacidades y Licencias",
                 "📋 Parte Diario de Personal",
                 "📊 Consulta de Bases de Datos",
             ],
+            index=0,
             label_visibility="collapsed",
         )
 
@@ -850,9 +1002,158 @@ else:
     timestamp_actual = ahora_pa.strftime("%Y-%m-%d %H:%M:%S")
 
     # ==========================================
+    # MÓDULO 0: DASHBOARD EJECUTIVO DINÁMICO (PRIMERA VISTA ARRIBA)
+    # ==========================================
+    if modulo_activo == "📈 Dashboard Ejecutivo":
+        col_dt1, col_dt2 = st.columns([5, 1])
+        with col_dt1:
+            st.markdown(
+                "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>📈 DASHBOARD EJECUTIVO DE PERSONAL — CON-C5</h1>",
+                unsafe_allow_html=True,
+            )
+        with col_dt2:
+            st.write("")
+            if st.button("🔄 Actualizar", use_container_width=True, key="btn_sync_dash_exec"):
+                leer_pestana_df.clear()
+                st.rerun()
+
+        df_dash_recojo = leer_pestana_df(PESTANA_PERSONAL, COLUMNAS_OFICIALES)
+        df_dash_agregadas = leer_pestana_df(PESTANA_AGREGADAS, COLUMNAS_OFICIALES)
+        df_dash_base = _normalizar_base_dashboard(df_dash_recojo, df_dash_agregadas)
+
+        st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+        st.caption(
+            f"Cálculo dinámico automático en vivo (`{timestamp_actual}` · Hora de Panamá) consolidando "
+            "**`Plan_de_Recojo`** + **`Unidades_Agregadas`**."
+        )
+
+        # Filtros dinámicos opcionales
+        cf1, cf2 = st.columns(2)
+        with cf1:
+            centros_sel_dash = st.multiselect(
+                "🏢 Filtrar por Centro:",
+                options=DASH_CENTROS_OFICIALES,
+                default=DASH_CENTROS_OFICIALES,
+                key="dash_exec_centros",
+            )
+        with cf2:
+            estamentos_sel_dash = st.multiselect(
+                "🛡️ Filtrar por Estamento:",
+                options=DASH_ESTAMENTOS_OFICIALES,
+                default=DASH_ESTAMENTOS_OFICIALES,
+                key="dash_exec_estamentos",
+            )
+
+        centros_activos = centros_sel_dash if centros_sel_dash else DASH_CENTROS_OFICIALES
+        estamentos_activos = estamentos_sel_dash if estamentos_sel_dash else DASH_ESTAMENTOS_OFICIALES
+
+        df_dash_f = df_dash_base[
+            df_dash_base["CENTRO_NORM"].isin(centros_activos)
+            & df_dash_base["ESTAMENTO_NORM"].isin(estamentos_activos)
+        ].copy()
+
+        # 1. Tabla: Distribución por Centros y Estamentos
+        rows_dist = []
+        for centro in centros_activos:
+            sub_c = df_dash_f[df_dash_f["CENTRO_NORM"] == centro]
+            fila = {"ESTAMENTO / CENTRO": centro}
+            for est in estamentos_activos:
+                fila[est] = int((sub_c["ESTAMENTO_NORM"] == est).sum())
+            fila["TOTAL HORIZONTAL"] = sum(fila[e] for e in estamentos_activos)
+            rows_dist.append(fila)
+
+        tot_vert_dist = {"ESTAMENTO / CENTRO": "TOTAL VERTICAL"}
+        for col_name in estamentos_activos + ["TOTAL HORIZONTAL"]:
+            tot_vert_dist[col_name] = sum(r[col_name] for r in rows_dist)
+        rows_dist.append(tot_vert_dist)
+        df_dist = pd.DataFrame(rows_dist)
+
+        # 2. Tabla: Parte de Operatividad
+        operativo_cnt = int((df_dash_f["OPERAT_NORM"] == "OPERATIVO").sum())
+        no_operativo_cnt = int(
+            ((df_dash_f["OPERAT_NORM"] == "NO OPERATIVO") & (df_dash_f["ESTAMENTO_NORM"] != "MNJ")).sum()
+        )
+        ordenes_acomp_cnt = int(df_dash_f["OPERAT_NORM"].str.contains("A.COMP", na=False).sum())
+        ordenes_drp_cnt = int(df_dash_f["OPERAT_NORM"].str.contains("DRP", na=False).sum())
+        mnj_cnt = int((df_dash_f["ESTAMENTO_NORM"] == "MNJ").sum())
+
+        df_op = pd.DataFrame([
+            {"ESTATUS OPERATIVO": "OPERATIVO", "CANTIDAD": operativo_cnt},
+            {"ESTATUS OPERATIVO": "NO OPERATIVO", "CANTIDAD": no_operativo_cnt},
+            {"ESTATUS OPERATIVO": "ORDENES A.COMP", "CANTIDAD": ordenes_acomp_cnt},
+            {"ESTATUS OPERATIVO": "ORDENES DRP", "CANTIDAD": ordenes_drp_cnt},
+            {"ESTATUS OPERATIVO": "MNJ", "CANTIDAD": mnj_cnt},
+            {
+                "ESTATUS OPERATIVO": "TOTAL",
+                "CANTIDAD": operativo_cnt + no_operativo_cnt + ordenes_acomp_cnt + ordenes_drp_cnt + mnj_cnt,
+            },
+        ])
+
+        # Tarjetas KPI Ejecutivas
+        total_activo = int(tot_vert_dist["TOTAL HORIZONTAL"])
+        no_op_ordenes = no_operativo_cnt + ordenes_acomp_cnt + ordenes_drp_cnt
+        uniformados = sum(
+            tot_vert_dist.get(e, 0) for e in ("PNP", "SENAN", "SENAFRONT") if e in tot_vert_dist
+        )
+        personal_civil = sum(
+            tot_vert_dist.get(e, 0) for e in ("MINSEG", "MNJ") if e in tot_vert_dist
+        )
+
+        dk1, dk2, dk3, dk4, dk5 = st.columns(5)
+        dk1.metric("Total Efectivo Activo", f"{total_activo:,}")
+        dk2.metric("Personal Operativo", f"{operativo_cnt:,}")
+        dk3.metric("No Operativo / Órdenes", f"{no_op_ordenes:,}")
+        dk4.metric("Uniformados", f"{uniformados:,}")
+        dk5.metric("Personal Civil", f"{personal_civil:,}")
+
+        st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
+
+        # Fila superior: Distribución por Centros y Estamentos + Parte de Operatividad
+        col_d_izq, col_d_der = st.columns([1.65, 1])
+        with col_d_izq:
+            st.markdown("<h3 style='color: #00ffff;'>🏢 Distribución por Centros y Estamentos</h3>", unsafe_allow_html=True)
+            st.dataframe(df_dist, use_container_width=True, hide_index=True)
+
+        with col_d_der:
+            st.markdown("<h3 style='color: #00ffff;'>⚡ Parte de Operatividad</h3>", unsafe_allow_html=True)
+            st.dataframe(df_op, use_container_width=True, hide_index=True)
+
+        st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
+
+        # 3. Matriz: Total de Unidades por Rango y Centros
+        st.markdown("<h3 style='color: #00ffff;'>🎖️ Total de Unidades por Rango y Centros</h3>", unsafe_allow_html=True)
+        rows_rango = []
+        for rango in DASH_RANGOS_OFICIALES:
+            sub_r = df_dash_f[df_dash_f["RANGO_NORM"] == rango]
+            fila_r = {"RANGO / CENTRO": rango}
+            for centro in centros_activos:
+                fila_r[centro] = int((sub_r["CENTRO_NORM"] == centro).sum())
+            fila_r["TOTAL HORIZONTAL"] = sum(fila_r[c] for c in centros_activos)
+            rows_rango.append(fila_r)
+
+        tot_vert_rango = {"RANGO / CENTRO": "TOTAL VERTICAL"}
+        for col_name in centros_activos + ["TOTAL HORIZONTAL"]:
+            tot_vert_rango[col_name] = sum(r[col_name] for r in rows_rango)
+        rows_rango.append(tot_vert_rango)
+        df_rango = pd.DataFrame(rows_rango)
+
+        st.dataframe(df_rango, use_container_width=True, hide_index=True)
+
+        st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
+
+        # 4. Gráfico interactivo directo en Streamlit
+        st.markdown("<h3 style='color: #00ffff;'>📊 Efectivo por Centro y Estamento</h3>", unsafe_allow_html=True)
+        df_chart = df_dist[df_dist["ESTAMENTO / CENTRO"] != "TOTAL VERTICAL"].set_index(
+            "ESTAMENTO / CENTRO"
+        )[estamentos_activos]
+        st.bar_chart(df_chart, height=300)
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # ==========================================
     # MÓDULO 1: NUEVO REGISTRO INDIVIDUAL
     # ==========================================
-    if modulo_activo == "➕ Registro Individual":
+    elif modulo_activo == "➕ Registro Individual":
         st.markdown(
             "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>➕ NUEVO REGISTRO DE PERSONAL</h1>",
             unsafe_allow_html=True,
