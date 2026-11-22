@@ -1226,12 +1226,11 @@ else:
 
                 st.dataframe(df_filtrado, use_container_width=True, height=440)
 
-                # --- EL CUADRO DE EDICIÓN SOLO APARECE AL ESCRIBIR UNA CONSULTA Y DAR ENTER ---
-                # --- AL BORRAR EL TEXTO DE BÚSQUEDA, EL CUADRO DESAPARECE Y QUEDA LIMPIO ---
+                # --- CUADRO COMPLETO DE EDICIÓN (60 CAMPOS) AL CONSULTAR Y DAR ENTER ---
                 if busqueda != "":
                     st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
                     st.markdown(
-                        "<h3 style='color: #00ffff;'>✏️ EDITAR REGISTRO DE LA UNIDAD</h3>",
+                        "<h3 style='color: #00ffff;'>✏️ EDITAR FICHA COMPLETA DE LA UNIDAD (60 CAMPOS)</h3>",
                         unsafe_allow_html=True,
                     )
                     if df_filtrado.empty:
@@ -1250,8 +1249,9 @@ else:
                         )
 
                         fila_ed = df_p.loc[idx_sel_ed]
-                        form_key = f"form_editar_{key_prefix}_{idx_sel_ed}_{busqueda}"
+                        form_key = f"form_editar_full_{key_prefix}_{idx_sel_ed}_{busqueda}"
                         with st.form(form_key):
+                            st.markdown("#### 1. Datos Personales y de Servicio")
                             e1, e2, e3, e4, e5 = st.columns(5)
                             ed_rango = e1.text_input("RANGO", value=str(fila_ed.get("RANGO", "")))
                             ed_posic = e2.text_input("POSIC", value=str(fila_ed.get("POSIC", "")))
@@ -1266,28 +1266,77 @@ else:
                             ed_tel = e9.text_input("TELEFONO_PERSONAL", value=str(fila_ed.get("TELEFONO_PERSONAL", "")))
                             ed_est = e10.text_input("ESTAMENTO", value=str(fila_ed.get("ESTAMENTO", "")))
 
-                            e11, e12, e13, e14, e15 = st.columns(5)
-                            ed_fing = e11.text_input("FECHA_INGRESO (YYYY-MM-DD)", value=str(fila_ed.get("FECHA_INGRESO", "")))
-                            ed_res = e12.text_input("RES_OGD_ASIG", value=str(fila_ed.get("RES_OGD_ASIG", "")))
-                            ed_centro = e13.text_input("ASIGNADO_CENTRO", value=str(fila_ed.get("ASIGNADO_CENTRO", "")))
-                            ed_depto = e14.text_input("DEPARTAMENTO", value=str(fila_ed.get("DEPARTAMENTO", "")))
-                            ed_turno = e15.text_input("TURNO", value=str(fila_ed.get("TURNO", "")))
+                            e11, e12, e13 = st.columns(3)
+                            ed_num_promo = e11.text_input("NUM_PROMOCION", value=str(fila_ed.get("NUM_PROMOCION", "")))
+                            ed_desc_promo = e12.text_input("DESCRIPCION_PROMOCION", value=str(fila_ed.get("DESCRIPCION_PROMOCION", "")))
+                            ed_fing = e13.text_input("FECHA_INGRESO (YYYY-MM-DD)", value=str(fila_ed.get("FECHA_INGRESO", "")))
 
-                            e16, e17, e18, e19, e20 = st.columns(5)
-                            ed_grupo = e16.text_input("GRUPO", value=str(fila_ed.get("GRUPO", "")))
-                            ed_func = e17.text_input("FUNCION", value=str(fila_ed.get("FUNCION", "")))
-                            ed_status = e18.text_input("ESTADO_STATUS", value=str(fila_ed.get("ESTADO_STATUS", "")))
-                            ed_op = e19.text_input("OPERAT_NO_OPERAT", value=str(fila_ed.get("OPERAT_NO_OPERAT", "")))
-                            ed_apto = e20.text_input("APTO_NO_APTO", value=str(fila_ed.get("APTO_NO_APTO", "")))
+                            st.markdown("#### 2. Funciones y Asignaciones")
+                            f1, f2, f3, f4, f5 = st.columns(5)
+                            ed_res = f1.text_input("RES_OGD_ASIG", value=str(fila_ed.get("RES_OGD_ASIG", "")))
+                            ed_asig_tr = f2.text_input("ASIG_TRASLADO", value=str(fila_ed.get("ASIG_TRASLADO", "")))
+                            ed_direc = f3.text_input("DIREC_DEPEN", value=str(fila_ed.get("DIREC_DEPEN", "")))
+                            ed_centro = f4.text_input("ASIGNADO_CENTRO", value=str(fila_ed.get("ASIGNADO_CENTRO", "")))
+                            ed_ucentro = f5.text_input("U_CENTRO_ASIGNADO", value=str(fila_ed.get("U_CENTRO_ASIGNADO", "")))
 
-                            e21, e22, e23, e24 = st.columns(4)
-                            ed_hm = e21.text_input("HIJOS_M", value=str(fila_ed.get("HIJOS_M", "")))
-                            ed_hf = e22.text_input("HIJAS_F", value=str(fila_ed.get("HIJAS_F", "")))
-                            ed_prov = e23.text_input("PROVINCIA", value=str(fila_ed.get("PROVINCIA", "")))
-                            ed_obs = e24.text_input("OBSERVACION", value=str(fila_ed.get("OBSERVACION", "")))
+                            f6, f7, f8, f9, f10 = st.columns(5)
+                            ed_depto = f6.text_input("DEPARTAMENTO", value=str(fila_ed.get("DEPARTAMENTO", "")))
+                            ed_turno = f7.text_input("TURNO", value=str(fila_ed.get("TURNO", "")))
+                            ed_grupo = f8.text_input("GRUPO", value=str(fila_ed.get("GRUPO", "")))
+                            ed_func = f9.text_input("FUNCION", value=str(fila_ed.get("FUNCION", "")))
+                            ed_status = f10.text_input("ESTADO_STATUS", value=str(fila_ed.get("ESTADO_STATUS", "")))
+
+                            st.markdown("#### 3. Operatividad y Salud")
+                            s1, s2, s3, s4, s5 = st.columns(5)
+                            ed_op = s1.text_input("OPERAT_NO_OPERAT", value=str(fila_ed.get("OPERAT_NO_OPERAT", "")))
+                            ed_perm_temp = s2.text_input("PERM_TEMP", value=str(fila_ed.get("PERM_TEMP", "")))
+                            ed_cond = s3.text_input("CONDICION", value=str(fila_ed.get("CONDICION", "")))
+                            ed_apto = s4.text_input("APTO_NO_APTO", value=str(fila_ed.get("APTO_NO_APTO", "")))
+                            ed_niv_salud = s5.text_input("NIVEL_SALUD", value=str(fila_ed.get("NIVEL_SALUD", "")))
+
+                            s6, s7, s8, s9, s10 = st.columns(5)
+                            ed_obs = s6.text_input("OBSERVACION", value=str(fila_ed.get("OBSERVACION", "")))
+                            ed_cert = s7.text_input("CERT_BUENA_SALUD", value=str(fila_ed.get("CERT_BUENA_SALUD", "")))
+                            ed_fdiag = s8.text_input("FECHA_DIAGNOSTICO", value=str(fila_ed.get("FECHA_DIAGNOSTICO", "")))
+                            ed_feval = s9.text_input("F_PROX_EVALUACION", value=str(fila_ed.get("F_PROX_EVALUACION", "")))
+                            ed_salud_oc = s10.text_input("SALUD_OCUPACIONAL", value=str(fila_ed.get("SALUD_OCUPACIONAL", "")))
+
+                            s11, _ = st.columns([1, 4])
+                            ed_pens = s11.text_input("PENSIONADO", value=str(fila_ed.get("PENSIONADO", "")))
+
+                            st.markdown("#### 4. Residencia, Emergencia, Familia y Estudios")
+                            g1, g2, g3, g4, g5 = st.columns(5)
+                            ed_prov = g1.text_input("PROVINCIA", value=str(fila_ed.get("PROVINCIA", "")))
+                            ed_dist = g2.text_input("DISTRITO", value=str(fila_ed.get("DISTRITO", "")))
+                            ed_corr = g3.text_input("CORREGIMIENTO", value=str(fila_ed.get("CORREGIMIENTO", "")))
+                            ed_lug = g4.text_input("LUGAR", value=str(fila_ed.get("LUGAR", "")))
+                            ed_sangre = g5.text_input("TIPO_SANGRE", value=str(fila_ed.get("TIPO_SANGRE", "")))
+
+                            g6, g7, g8, g9, g10 = st.columns(5)
+                            ed_nom_em = g6.text_input("NOMBRE_EMERGENCIA", value=str(fila_ed.get("NOMBRE_EMERGENCIA", "")))
+                            ed_par_em = g7.text_input("PARENTESCO", value=str(fila_ed.get("PARENTESCO", "")))
+                            ed_tel_em = g8.text_input("TELEFONO_EMERGENCIA", value=str(fila_ed.get("TELEFONO_EMERGENCIA", "")))
+                            ed_ecivil = g9.text_input("ESTADO_CIVIL", value=str(fila_ed.get("ESTADO_CIVIL", "")))
+                            ed_donante = g10.text_input("DONANTE_SANGRE", value=str(fila_ed.get("DONANTE_SANGRE", "")))
+
+                            g11, g12, g13, g14 = st.columns(4)
+                            ed_sec = g11.text_input("SECUNDARIA", value=str(fila_ed.get("SECUNDARIA", "")))
+                            ed_univ = g12.text_input("UNIVERSIDAD", value=str(fila_ed.get("UNIVERSIDAD", "")))
+                            ed_hm = g13.text_input("HIJOS_M", value=str(fila_ed.get("HIJOS_M", "")))
+                            ed_hf = g14.text_input("HIJAS_F", value=str(fila_ed.get("HIJAS_F", "")))
+
+                            st.markdown("#### 5. Tallas de Uniforme y Equipamiento")
+                            t1, t2, t3, t4, t5, t6, t7 = st.columns(7)
+                            ed_tcam = t1.text_input("TALLA_CAMISA", value=str(fila_ed.get("TALLA_CAMISA", "")))
+                            ed_tpan = t2.text_input("TALLA_PANTALON", value=str(fila_ed.get("TALLA_PANTALON", "")))
+                            ed_tsue = t3.text_input("TALLA_SUETER", value=str(fila_ed.get("TALLA_SUETER", "")))
+                            ed_tbot = t4.text_input("TALLA_BOTAS", value=str(fila_ed.get("TALLA_BOTAS", "")))
+                            ed_tzap = t5.text_input("TALLA_ZAPATOS", value=str(fila_ed.get("TALLA_ZAPATOS", "")))
+                            ed_tque = t6.text_input("TALLA_QUEPI", value=str(fila_ed.get("TALLA_QUEPI", "")))
+                            ed_tcor = t7.text_input("TALLA_CORREA", value=str(fila_ed.get("TALLA_CORREA", "")))
 
                             guardar_ed = st.form_submit_button(
-                                f"💾 Guardar Cambios en {nombre_hoja}",
+                                f"💾 Guardar Cambios Completos en {nombre_hoja}",
                                 use_container_width=True,
                             )
 
@@ -1304,20 +1353,52 @@ else:
                                         "GENERO": limpiar_valor(ed_genero),
                                         "TELEFONO_PERSONAL": limpiar_valor(ed_tel),
                                         "ESTAMENTO": limpiar_valor(ed_est),
+                                        "NUM_PROMOCION": limpiar_valor(ed_num_promo),
+                                        "DESCRIPCION_PROMOCION": limpiar_valor(ed_desc_promo),
                                         "FECHA_INGRESO": limpiar_valor(ed_fing),
                                         "RES_OGD_ASIG": limpiar_valor(ed_res),
+                                        "ASIG_TRASLADO": limpiar_valor(ed_asig_tr),
+                                        "DIREC_DEPEN": limpiar_valor(ed_direc),
                                         "ASIGNADO_CENTRO": limpiar_valor(ed_centro),
+                                        "U_CENTRO_ASIGNADO": limpiar_valor(ed_ucentro),
                                         "DEPARTAMENTO": limpiar_valor(ed_depto),
                                         "TURNO": limpiar_valor(ed_turno),
                                         "GRUPO": limpiar_valor(ed_grupo),
                                         "FUNCION": limpiar_valor(ed_func),
                                         "ESTADO_STATUS": limpiar_valor(ed_status),
                                         "OPERAT_NO_OPERAT": limpiar_valor(ed_op),
+                                        "PERM_TEMP": limpiar_valor(ed_perm_temp),
+                                        "CONDICION": limpiar_valor(ed_cond),
                                         "APTO_NO_APTO": limpiar_valor(ed_apto),
+                                        "NIVEL_SALUD": limpiar_valor(ed_niv_salud),
+                                        "OBSERVACION": limpiar_valor(ed_obs),
+                                        "CERT_BUENA_SALUD": limpiar_valor(ed_cert),
+                                        "FECHA_DIAGNOSTICO": limpiar_valor(ed_fdiag),
+                                        "F_PROX_EVALUACION": limpiar_valor(ed_feval),
+                                        "SALUD_OCUPACIONAL": limpiar_valor(ed_salud_oc),
+                                        "PENSIONADO": limpiar_valor(ed_pens),
+                                        "PROVINCIA": limpiar_valor(ed_prov),
+                                        "DISTRITO": limpiar_valor(ed_dist),
+                                        "CORREGIMIENTO": limpiar_valor(ed_corr),
+                                        "LUGAR": limpiar_valor(ed_lug),
+                                        "TIPO_SANGRE": limpiar_valor(ed_sangre),
+                                        "NOMBRE_EMERGENCIA": limpiar_valor(ed_nom_em),
+                                        "PARENTESCO": limpiar_valor(ed_par_em),
+                                        "TELEFONO_EMERGENCIA": limpiar_valor(ed_tel_em),
+                                        "ESTADO_CIVIL": limpiar_valor(ed_ecivil),
+                                        "DONANTE_SANGRE": limpiar_valor(ed_donante),
+                                        "SECUNDARIA": limpiar_valor(ed_sec),
+                                        "UNIVERSIDAD": limpiar_valor(ed_univ),
                                         "HIJOS_M": limpiar_valor(ed_hm),
                                         "HIJAS_F": limpiar_valor(ed_hf),
                                         "PROVINCIA": limpiar_valor(ed_prov),
-                                        "OBSERVACION": limpiar_valor(ed_obs),
+                                        "TALLA_CAMISA": limpiar_valor(ed_tcam),
+                                        "TALLA_PANTALON": limpiar_valor(ed_tpan),
+                                        "TALLA_SUETER": limpiar_valor(ed_tsue),
+                                        "TALLA_BOTAS": limpiar_valor(ed_tbot),
+                                        "TALLA_ZAPATOS": limpiar_valor(ed_tzap),
+                                        "TALLA_QUEPI": limpiar_valor(ed_tque),
+                                        "TALLA_CORREA": limpiar_valor(ed_tcor),
                                     }
                                     actualizar_fila_personal(
                                         nombre_pestana=nombre_hoja,
@@ -1326,7 +1407,7 @@ else:
                                         usuario_actual=st.session_state.get("usuario_actual", "ADMINISTRADOR"),
                                         timestamp_str=timestamp_actual,
                                     )
-                                    st.success(f"✔️ Datos actualizados en **`{nombre_hoja}`** para **{limpiar_valor(ed_nombre)} {limpiar_valor(ed_apellido)}**.")
+                                    st.success(f"✔️ Ficha completa actualizada en **`{nombre_hoja}`** para **{limpiar_valor(ed_nombre)} {limpiar_valor(ed_apellido)}**.")
                                     st.rerun()
                                 except Exception as e_err:
                                     st.error(f"❌ Error al actualizar el registro: {e_err}")
