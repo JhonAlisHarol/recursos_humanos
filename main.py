@@ -160,6 +160,12 @@ PESTANA_AGREGADAS = "Unidades_Agregadas"
 PESTANA_JUB_PRES_TRAS = "Vac.Jubilacion_U.Prestados_U.Trasladados"
 PESTANA_NOVEDADES = "Permiso,incapacidad,licencia"
 
+PESTANAS_UNIDADES = [
+    PESTANA_PERSONAL,
+    PESTANA_AGREGADAS,
+    PESTANA_JUB_PRES_TRAS,
+]
+
 COLUMNAS_OFICIALES = [
     "TIMESTAMP", "USUARIO_REGISTRO", "RANGO", "POSIC", "PLACA_METALICA",
     "NOMBRE", "APELLIDO", "CEDULA", "FECHA_NACIMIENTO", "EDAD", "GENERO",
@@ -221,17 +227,80 @@ def leer_pestana_df(nombre_pestana, columnas_esperadas):
             return pd.DataFrame(columns=columnas_esperadas)
         encabezados = [str(h).strip() for h in valores[0]]
         filas = valores[1:]
-        # Ajustar longitud de cada fila por si tiene celdas vacías al final
         num_cols = len(encabezados)
         filas_norm = [
             f[:num_cols] + [""] * max(0, num_cols - len(f))
             for f in filas
         ]
-        df = pd.DataFrame(filas_norm, columns=encabezados)
-        return df
+        return pd.DataFrame(filas_norm, columns=encabezados)
     except Exception as e:
         st.error(f"❌ Error al leer la pestaña `{nombre_pestana}`: {e}")
         return pd.DataFrame(columns=columnas_esperadas)
+
+def mover_unidad_entre_pestanas(
+    pestana_origen,
+    pestana_destino,
+    indice_df_origen,
+    nuevo_estado_status,
+    usuario_actual,
+    timestamp_str,
+    respaldo_mov="",
+    obs_adicional="",
+):
+    if pestana_origen == pestana_destino:
+        raise ValueError("La pestaña de origen y destino no pueden ser la misma.")
+
+    ws_orig = obtener_o_crear_worksheet(pestana_origen, COLUMNAS_OFICIALES)
+    ws_dest = obtener_o_crear_worksheet(pestana_destino, COLUMNAS_OFICIALES)
+
+    todos_orig = ws_orig.get_all_values()
+    if len(todos_orig) <= 1:
+        raise ValueError(f"La pestaña `{pestana_origen}` no tiene registros.")
+
+    encabezados = [str(h).strip() for h in todos_orig[0]]
+    num_cols = len(COLUMNAS_OFICIALES)
+
+    # En la hoja de Google Sheets, la fila 1 es encabezado; el índice 0 del DataFrame corresponde a la fila 2
+    fila_sheet_num = indice_df_origen + 2
+    if fila_sheet_num < 2 or fila_sheet_num > len(todos_orig):
+        raise IndexError("No se encontró la fila seleccionada en la hoja de origen.")
+
+    fila_cruda = todos_orig[fila_sheet_num - 1]
+    fila_60 = (fila_cruda[:num_cols] + [""] * max(0, num_cols - len(fila_cruda)))
+
+    # Mapear a diccionario por nombre oficial para actualizar campos de movimiento sin perder datos
+    mapa_cols = {col: idx for idx, col in enumerate(COLUMNAS_OFICIALES)}
+    if encabezados != COLUMNAS_OFICIALES:
+        dic_fila = {col: "" for col in COLUMNAS_OFICIALES}
+        for c_idx, h_name in enumerate(encabezados):
+            if h_name in dic_fila and c_idx < len(fila_cruda):
+                dic_fila[h_name] = fila_cruda[c_idx]
+        fila_60 = [dic_fila[c] for c in COLUMNAS_OFICIALES]
+
+    estado_limpio = limpiar_valor(nuevo_estado_status)
+    if estado_limpio:
+        fila_60[mapa_cols["ESTADO_STATUS"]] = estado_limpio
+
+    if limpiar_valor(respaldo_mov):
+        prev_res = str(fila_60[mapa_cols["RES_OGD_ASIG"]]).strip()
+        nuevo_res = limpiar_valor(respaldo_mov)
+        fila_60[mapa_cols["RES_OGD_ASIG"]] = (
+            f"{prev_res} | {nuevo_res}" if prev_res and nuevo_res not in prev_res else (nuevo_res or prev_res)
+        )
+
+    nota_mov = f"MOVIDO [{pestana_origen} -> {pestana_destino}] POR {limpiar_valor(usuario_actual)} ({timestamp_str})"
+    if limpiar_valor(obs_adicional):
+        nota_mov = f"{nota_mov} · {limpiar_valor(obs_adicional)}"
+
+    obs_previa = str(fila_60[mapa_cols["OBSERVACION"]]).strip()
+    fila_60[mapa_cols["OBSERVACION"]] = f"{obs_previa} | {nota_mov}" if obs_previa else nota_mov
+
+    # 1. Agregar a pestaña destino
+    ws_dest.append_row(fila_60, value_input_option="USER_ENTERED")
+    # 2. Eliminar de pestaña origen para mantener sincronía sin duplicados
+    ws_orig.delete_rows(fila_sheet_num)
+
+    leer_pestana_df.clear()
 
 def convertir_df_a_excel(df, nombre_hoja="Datos"):
     buffer = BytesIO()
@@ -399,6 +468,7 @@ else:
             "Seleccione un módulo:",
             [
                 "➕ Registro Individual",
+                "🔄 Movimiento de Unidades",
                 "🩺 Permisos, Incapacidades y Licencias",
                 "📊 Consulta de Bases de Datos",
             ],
@@ -612,7 +682,135 @@ else:
                             st.error(f"❌ Ocurrió un error al guardar en la base de datos: {e}")
 
     # ==========================================
-    # MÓDULO 2: PERMISOS, INCAPACIDADES Y LICENCIAS (REGISTRO INDIVIDUAL)
+    # MÓDULO 2: MOVIMIENTO DINÁMICO DE UNIDADES ENTRE PESTAÑAS
+    # ==========================================
+    elif modulo_activo == "🔄 Movimiento de Unidades":
+        st.markdown(
+            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>🔄 MOVIMIENTO DINÁMICO DE UNIDADES</h1>",
+            unsafe_allow_html=True,
+        )
+
+        st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+        st.write(
+            "Mueve unidades de forma dinámica entre **`Plan_de_Recojo`**, **`Unidades_Agregadas`** y "
+            "**`Vac.Jubilacion_U.Prestados_U.Trasladados`** (salidas por traslado/préstamo/jubilación o retornos a los centros) "
+            "sin cortar ni pegar manualmente en Google Sheets."
+        )
+
+        m_col1, m_col2 = st.columns(2)
+        pestana_origen_sel = m_col1.selectbox(
+            "1. Pestaña de Origen (donde está actualmente la unidad):",
+            PESTANAS_UNIDADES,
+            key="mov_origen",
+        )
+
+        destinos_posibles = [p for p in PESTANAS_UNIDADES if p != pestana_origen_sel]
+        # Si viene de una pestaña activa, sugerir por defecto Vac.Jubilacion_U.Prestados_U.Trasladados;
+        # si viene de Vac.Jubilacion_U.Prestados_U.Trasladados, sugerir Plan_de_Recojo para retorno.
+        idx_dest_def = 0
+        if pestana_origen_sel != PESTANA_JUB_PRES_TRAS and PESTANA_JUB_PRES_TRAS in destinos_posibles:
+            idx_dest_def = destinos_posibles.index(PESTANA_JUB_PRES_TRAS)
+        elif PESTANA_PERSONAL in destinos_posibles:
+            idx_dest_def = destinos_posibles.index(PESTANA_PERSONAL)
+
+        pestana_destino_sel = m_col2.selectbox(
+            "2. Pestaña de Destino (a dónde pasará la unidad):",
+            destinos_posibles,
+            index=idx_dest_def,
+            key="mov_destino",
+        )
+
+        df_origen_mov = leer_pestana_df(pestana_origen_sel, COLUMNAS_OFICIALES)
+
+        if df_origen_mov.empty:
+            st.warning(f"⚠️ La pestaña **`{pestana_origen_sel}`** no tiene registros disponibles.")
+        else:
+            filtro_busq_mov = st.text_input(
+                "3. Buscar unidad por Cédula, Nombre, Apellido o Posición:",
+                key="mov_buscar",
+            ).strip().upper()
+
+            df_candidatos = df_origen_mov.copy()
+            if filtro_busq_mov:
+                mask_m = (
+                    df_candidatos["CEDULA"].str.upper().str.contains(filtro_busq_mov, na=False)
+                    | df_candidatos["NOMBRE"].str.upper().str.contains(filtro_busq_mov, na=False)
+                    | df_candidatos["APELLIDO"].str.upper().str.contains(filtro_busq_mov, na=False)
+                    | df_candidatos["POSIC"].str.upper().str.contains(filtro_busq_mov, na=False)
+                )
+                df_candidatos = df_candidatos[mask_m]
+
+            if df_candidatos.empty:
+                st.info("No se encontraron unidades con ese criterio de búsqueda.")
+            else:
+                opciones_indices = list(df_candidatos.index)
+                unidad_idx = st.selectbox(
+                    "4. Selecciona la unidad a mover:",
+                    opciones_indices,
+                    format_func=lambda idx: (
+                        f"{df_origen_mov.loc[idx, 'RANGO']} | POSIC: {df_origen_mov.loc[idx, 'POSIC']} | "
+                        f"{df_origen_mov.loc[idx, 'NOMBRE']} {df_origen_mov.loc[idx, 'APELLIDO']} | "
+                        f"CÉD: {df_origen_mov.loc[idx, 'CEDULA']} | "
+                        f"ESTADO: {df_origen_mov.loc[idx, 'ESTADO_STATUS']}"
+                    ),
+                    key="mov_unidad_sel",
+                )
+
+                fila_sel = df_origen_mov.loc[unidad_idx]
+                st.markdown("**Vista previa de la unidad seleccionada:**")
+                st.dataframe(
+                    pd.DataFrame([fila_sel[["RANGO", "POSIC", "NOMBRE", "APELLIDO", "CEDULA", "ESTAMENTO", "ASIGNADO_CENTRO", "DEPARTAMENTO", "ESTADO_STATUS"]]]),
+                    use_container_width=True,
+                )
+
+                # Sugerir ESTADO_STATUS coherente según el destino
+                if pestana_destino_sel == PESTANA_JUB_PRES_TRAS:
+                    estados_sugeridos = ["TRASLADADOS", "PRESTADO", "VACACIONES POR JUBILACIONES", "ASIGNADO"]
+                else:
+                    estados_sugeridos = ["ACTIVO", "ASIGNADO", "TRASLADADOS", "PRESTADO", "VACACIONES"]
+
+                d_col1, d_col2, d_col3 = st.columns(3)
+                estado_nuevo = d_col1.selectbox(
+                    "5. Nuevo ESTADO_STATUS al mover:",
+                    estados_sugeridos,
+                    key="mov_nuevo_estado",
+                )
+                respaldo_doc = d_col2.text_input(
+                    "Resolución / OGD / Respaldo (opcional):",
+                    key="mov_respaldo",
+                )
+                nota_mov = d_col3.text_input(
+                    "Motivo / Observación del movimiento (opcional):",
+                    key="mov_obs",
+                )
+
+                if st.button(
+                    f"🔄 Mover a {pestana_destino_sel} y quitar de {pestana_origen_sel}",
+                    use_container_width=True,
+                ):
+                    try:
+                        mover_unidad_entre_pestanas(
+                            pestana_origen=pestana_origen_sel,
+                            pestana_destino=pestana_destino_sel,
+                            indice_df_origen=int(unidad_idx),
+                            nuevo_estado_status=estado_nuevo,
+                            usuario_actual=st.session_state.get("usuario_actual", "ADMINISTRADOR"),
+                            timestamp_str=timestamp_actual,
+                            respaldo_mov=respaldo_doc,
+                            obs_adicional=nota_mov,
+                        )
+                        st.success(
+                            f"✔️ Unidad **{fila_sel['NOMBRE']} {fila_sel['APELLIDO']}** (Cédula: `{fila_sel['CEDULA']}`) "
+                            f"movida de **`{pestana_origen_sel}`** a **`{pestana_destino_sel}`** con estado **`{estado_nuevo}`**."
+                        )
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error al mover la unidad: {e}")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # ==========================================
+    # MÓDULO 3: PERMISOS, INCAPACIDADES Y LICENCIAS (REGISTRO INDIVIDUAL)
     # ==========================================
     elif modulo_activo == "🩺 Permisos, Incapacidades y Licencias":
         st.markdown(
@@ -712,7 +910,7 @@ else:
                         st.error(f"❌ Error al guardar en `{PESTANA_NOVEDADES}`: {e}")
 
     # ==========================================
-    # MÓDULO 3: CONSULTA COMPLETA DE BASES DE DATOS (2 PESTAÑAS PRINCIPALES)
+    # MÓDULO 4: CONSULTA COMPLETA DE BASES DE DATOS (2 PESTAÑAS PRINCIPALES)
     # ==========================================
     elif modulo_activo == "📊 Consulta de Bases de Datos":
         col_tit, col_btn = st.columns([5, 1])
@@ -732,9 +930,6 @@ else:
             "🩺 2. PERMISOS, INCAPACIDADES Y LICENCIAS",
         ])
 
-        # ----------------------------------------------------------------------
-        # PESTAÑA 1: VISUALIZACIÓN COMPLETA DE LAS 3 BASES DE PERSONAL
-        # ----------------------------------------------------------------------
         with tab_bd_personal:
             sub_tab_1, sub_tab_2, sub_tab_3 = st.tabs([
                 "👮 Plan_de_Recojo",
@@ -805,9 +1000,6 @@ else:
             with sub_tab_3:
                 renderizar_visor_personal(PESTANA_JUB_PRES_TRAS, "jub_pres_tras")
 
-        # ----------------------------------------------------------------------
-        # PESTAÑA 2: BASE DE DATOS COMPLETA DE PERMISOS, INCAPACIDADES Y LICENCIAS
-        # ----------------------------------------------------------------------
         with tab_bd_novedades:
             df_nov = leer_pestana_df(PESTANA_NOVEDADES, COLUMNAS_NOVEDADES)
             st.markdown('<div class="neon-card">', unsafe_allow_html=True)
