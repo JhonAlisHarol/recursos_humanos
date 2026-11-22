@@ -328,7 +328,8 @@ def ordenar_pestana_por_rango(nombre_pestana):
 def actualizar_fila_personal(nombre_pestana, indice_df, datos_actualizados, usuario_actual, timestamp_str):
     """
     Actualiza una fila específica en Plan_de_Recojo, Unidades_Agregadas o
-    Vac.Jubilacion_U.Prestados_U.Trasladados sin alterar el resto de registros.
+    Vac.Jubilacion_U.Prestados_U.Trasladados sin alterar el resto de registros,
+    registrando quién hizo el cambio en USUARIO_REGISTRO y TIMESTAMP.
     """
     ws = obtener_o_crear_worksheet(nombre_pestana, COLUMNAS_OFICIALES)
     todos = ws.get_all_values()
@@ -344,10 +345,9 @@ def actualizar_fila_personal(nombre_pestana, indice_df, datos_actualizados, usua
         if col_name in datos_actualizados:
             fila_actual[idx_c] = datos_actualizados[col_name]
 
-    obs_prev = str(fila_actual[32]).strip()
-    nota_ed = f"EDITADO POR {limpiar_valor(usuario_actual)} ({timestamp_str})"
-    if nota_ed not in obs_prev:
-        fila_actual[32] = f"{obs_prev} | {nota_ed}" if obs_prev else nota_ed
+    # Registrar quién hizo el cambio en USUARIO_REGISTRO (Columna B / índice 1) y TIMESTAMP (Columna A / índice 0)
+    fila_actual[0] = timestamp_str
+    fila_actual[1] = f"{limpiar_valor(usuario_actual)} (EDITADO {timestamp_str})"
 
     f_edad, f_serv, f_hijos = formulas_fila_personal(fila_sheet)
     fila_actual[9] = f_edad
@@ -1226,7 +1226,6 @@ else:
 
                 st.dataframe(df_filtrado, use_container_width=True, height=440)
 
-                # --- CUADRO COMPLETO DE EDICIÓN (60 CAMPOS) AL CONSULTAR Y DAR ENTER ---
                 if busqueda != "":
                     st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
                     st.markdown(
@@ -1391,7 +1390,6 @@ else:
                                         "UNIVERSIDAD": limpiar_valor(ed_univ),
                                         "HIJOS_M": limpiar_valor(ed_hm),
                                         "HIJAS_F": limpiar_valor(ed_hf),
-                                        "PROVINCIA": limpiar_valor(ed_prov),
                                         "TALLA_CAMISA": limpiar_valor(ed_tcam),
                                         "TALLA_PANTALON": limpiar_valor(ed_tpan),
                                         "TALLA_SUETER": limpiar_valor(ed_tsue),
