@@ -166,6 +166,12 @@ PESTANAS_UNIDADES = [
     PESTANA_JUB_PRES_TRAS,
 ]
 
+# Pestañas que siempre deben mantenerse ordenadas por jerarquía de RANGO
+PESTANAS_ORDENADAS_RANGO = {
+    PESTANA_PERSONAL,
+    PESTANA_AGREGADAS,
+}
+
 COLUMNAS_OFICIALES = [
     "TIMESTAMP", "USUARIO_REGISTRO", "RANGO", "POSIC", "PLACA_METALICA",
     "NOMBRE", "APELLIDO", "CEDULA", "FECHA_NACIMIENTO", "EDAD", "GENERO",
@@ -194,6 +200,54 @@ COLUMNAS_NOVEDADES = [
     "OBSERVACION",
 ]
 
+# Jerarquía oficial de rangos policiales / estamentales (menor número = mayor jerarquía)
+JERARQUIA_RANGOS = {
+    "COMISIONADO": 1,
+    "COMISIONADO (A)": 1,
+    "COMISIONADA": 1,
+    "COM.": 1,
+    "SUBCOMISIONADO": 2,
+    "SUBCOMISIONADA": 2,
+    "SUBCOM.": 2,
+    "SUBCOM": 2,
+    "MAYOR": 3,
+    "CAPITÁN": 4,
+    "CAPITAN": 4,
+    "TENIENTE": 5,
+    "SUBTENIENTE": 6,
+    "SARGENTO 1º": 7,
+    "SARGENTO 1°": 7,
+    "SARGENTO 1RO": 7,
+    "SARGENTO PRIMERO": 7,
+    "SARGENTO 2º": 8,
+    "SARGENTO 2°": 8,
+    "SARGENTO 2DO": 8,
+    "SARGENTO SEGUNDO": 8,
+    "CABO 1º": 9,
+    "CABO 1°": 9,
+    "CABO 1RO": 9,
+    "CABO PRIMERO": 9,
+    "CABO 2º": 10,
+    "CABO 2°": 10,
+    "CABO 2DO": 10,
+    "CABO SEGUNDO": 10,
+    "AGENTE": 11,
+    "MINSEG": 12,
+    "M.N.J.": 13,
+    "M.N.J": 13,
+    "MNJ": 13,
+}
+
+def clave_orden_rango_posic(fila):
+    rango_txt = re.sub(r"\s+", " ", str(fila[2]).strip().upper())
+    peso_rango = JERARQUIA_RANGOS.get(rango_txt, 99)
+    posic_txt = str(fila[3]).strip()
+    try:
+        peso_posic = int(float(posic_txt)) if posic_txt else 999999999
+    except ValueError:
+        peso_posic = 999999999
+    return (peso_rango, peso_posic, str(fila[6]).strip().upper(), str(fila[5]).strip().upper())
+
 @st.cache_resource
 def conectar_google_sheets():
     scopes = [
@@ -217,6 +271,41 @@ def obtener_o_crear_worksheet(nombre_pestana, columnas_hdr=None):
     if not ws.row_values(1):
         ws.append_row(columnas_hdr, value_input_option="USER_ENTERED")
     return ws
+
+def ordenar_pestana_por_rango(nombre_pestana):
+    """
+    Reordena por jerarquía de RANGO + POSIC las pestañas activas de centros
+    (Plan_de_Recojo y Unidades_Agregadas) y restablece las fórmulas dinámicas
+    de EDAD (J), ANOS_SERVICIOS (Q) y TOTAL_HIJOS (BA) en cada fila.
+    No modifica Vac.Jubilacion_U.Prestados_U.Trasladados.
+    """
+    if nombre_pestana not in PESTANAS_ORDENADAS_RANGO:
+        return
+
+    ws = obtener_o_crear_worksheet(nombre_pestana, COLUMNAS_OFICIALES)
+    todos = ws.get_all_values()
+    if len(todos) <= 2:
+        return
+
+    num_cols = len(COLUMNAS_OFICIALES)
+    encabezado = todos[0][:num_cols] + COLUMNAS_OFICIALES[len(todos[0]):]
+    filas = [
+        f[:num_cols] + [""] * max(0, num_cols - len(f))
+        for f in todos[1:]
+        if any(str(celda).strip() != "" for celda in f)
+    ]
+
+    filas_ordenadas = sorted(filas, key=clave_orden_rango_posic)
+
+    # Reaplicar fórmulas dinámicas por fila (2..N+1) en columnas J (EDAD), Q (ANOS_SERVICIOS) y BA (TOTAL_HIJOS)
+    for idx, fila in enumerate(filas_ordenadas, start=2):
+        fila[9] = f'=IF(ISBLANK(I{idx}),"",DATEDIF(I{idx},TODAY(),"Y"))'
+        fila[16] = f'=IF(ISBLANK(P{idx}),"",DATEDIF(P{idx},TODAY(),"Y"))'
+        fila[52] = f'=IF(AND(ISBLANK(AY{idx}),ISBLANK(AZ{idx})),"",SUM(AY{idx}:AZ{idx}))'
+
+    matriz_final = [encabezado] + filas_ordenadas
+    ws.clear()
+    ws.update(range_name=f"A1:BH{len(matriz_final)}", values=matriz_final, value_input_option="USER_ENTERED")
 
 @st.cache_data(ttl=60)
 def leer_pestana_df(nombre_pestana, columnas_esperadas):
@@ -260,15 +349,13 @@ def mover_unidad_entre_pestanas(
     encabezados = [str(h).strip() for h in todos_orig[0]]
     num_cols = len(COLUMNAS_OFICIALES)
 
-    # En la hoja de Google Sheets, la fila 1 es encabezado; el índice 0 del DataFrame corresponde a la fila 2
     fila_sheet_num = indice_df_origen + 2
     if fila_sheet_num < 2 or fila_sheet_num > len(todos_orig):
         raise IndexError("No se encontró la fila seleccionada en la hoja de origen.")
 
     fila_cruda = todos_orig[fila_sheet_num - 1]
-    fila_60 = (fila_cruda[:num_cols] + [""] * max(0, num_cols - len(fila_cruda)))
+    fila_60 = fila_cruda[:num_cols] + [""] * max(0, num_cols - len(fila_cruda))
 
-    # Mapear a diccionario por nombre oficial para actualizar campos de movimiento sin perder datos
     mapa_cols = {col: idx for idx, col in enumerate(COLUMNAS_OFICIALES)}
     if encabezados != COLUMNAS_OFICIALES:
         dic_fila = {col: "" for col in COLUMNAS_OFICIALES}
@@ -295,10 +382,16 @@ def mover_unidad_entre_pestanas(
     obs_previa = str(fila_60[mapa_cols["OBSERVACION"]]).strip()
     fila_60[mapa_cols["OBSERVACION"]] = f"{obs_previa} | {nota_mov}" if obs_previa else nota_mov
 
-    # 1. Agregar a pestaña destino
+    # 1. Agregar a pestaña destino y eliminar de pestaña origen
     ws_dest.append_row(fila_60, value_input_option="USER_ENTERED")
-    # 2. Eliminar de pestaña origen para mantener sincronía sin duplicados
     ws_orig.delete_rows(fila_sheet_num)
+
+    # 2. Mantener ordenadas por RANGO las pestañas activas afectadas (Plan_de_Recojo / Unidades_Agregadas)
+    #    La tercera pestaña (Vac.Jubilacion_U.Prestados_U.Trasladados) conserva su orden cronológico/resolución.
+    if pestana_destino in PESTANAS_ORDENADAS_RANGO:
+        ordenar_pestana_por_rango(pestana_destino)
+    if pestana_origen in PESTANAS_ORDENADAS_RANGO:
+        ordenar_pestana_por_rango(pestana_origen)
 
     leer_pestana_df.clear()
 
@@ -675,9 +768,10 @@ else:
 
                             hoja_bd = obtener_o_crear_worksheet(PESTANA_PERSONAL, COLUMNAS_OFICIALES)
                             hoja_bd.append_row(nueva_fila, value_input_option="USER_ENTERED")
+                            ordenar_pestana_por_rango(PESTANA_PERSONAL)
                             leer_pestana_df.clear()
 
-                            st.success(f"✔️ El elemento {limpiar_valor(rango)} {limpiar_valor(nombre)} {limpiar_valor(apellido)} con cédula {limpiar_valor(cedula)} ha sido registrado exitosamente.")
+                            st.success(f"✔️ El elemento {limpiar_valor(rango)} {limpiar_valor(nombre)} {limpiar_valor(apellido)} con cédula {limpiar_valor(cedula)} ha sido registrado y ordenado jerárquicamente.")
                         except Exception as e:
                             st.error(f"❌ Ocurrió un error al guardar en la base de datos: {e}")
 
@@ -692,9 +786,9 @@ else:
 
         st.markdown('<div class="neon-card">', unsafe_allow_html=True)
         st.write(
-            "Mueve unidades de forma dinámica entre **`Plan_de_Recojo`**, **`Unidades_Agregadas`** y "
-            "**`Vac.Jubilacion_U.Prestados_U.Trasladados`** (salidas por traslado/préstamo/jubilación o retornos a los centros) "
-            "sin cortar ni pegar manualmente en Google Sheets."
+            "Mueve unidades entre **`Plan_de_Recojo`**, **`Unidades_Agregadas`** y "
+            "**`Vac.Jubilacion_U.Prestados_U.Trasladados`**. Cada vez que ingresa o retorna una unidad a "
+            "**`Plan_de_Recojo`** o **`Unidades_Agregadas`**, la hoja se reordena automáticamente por **jerarquía de RANGO + POSIC**."
         )
 
         m_col1, m_col2 = st.columns(2)
@@ -705,8 +799,6 @@ else:
         )
 
         destinos_posibles = [p for p in PESTANAS_UNIDADES if p != pestana_origen_sel]
-        # Si viene de una pestaña activa, sugerir por defecto Vac.Jubilacion_U.Prestados_U.Trasladados;
-        # si viene de Vac.Jubilacion_U.Prestados_U.Trasladados, sugerir Plan_de_Recojo para retorno.
         idx_dest_def = 0
         if pestana_origen_sel != PESTANA_JUB_PRES_TRAS and PESTANA_JUB_PRES_TRAS in destinos_posibles:
             idx_dest_def = destinos_posibles.index(PESTANA_JUB_PRES_TRAS)
@@ -763,7 +855,6 @@ else:
                     use_container_width=True,
                 )
 
-                # Sugerir ESTADO_STATUS coherente según el destino
                 if pestana_destino_sel == PESTANA_JUB_PRES_TRAS:
                     estados_sugeridos = ["TRASLADADOS", "PRESTADO", "VACACIONES POR JUBILACIONES", "ASIGNADO"]
                 else:
