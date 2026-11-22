@@ -325,6 +325,43 @@ def ordenar_pestana_por_rango(nombre_pestana):
     ws.clear()
     ws.update(range_name=f"A1:BH{len(matriz_final)}", values=matriz_final, value_input_option="USER_ENTERED")
 
+def actualizar_fila_personal(nombre_pestana, indice_df, datos_actualizados, usuario_actual, timestamp_str):
+    """
+    Actualiza una fila específica en Plan_de_Recojo, Unidades_Agregadas o
+    Vac.Jubilacion_U.Prestados_U.Trasladados sin alterar el resto de registros.
+    """
+    ws = obtener_o_crear_worksheet(nombre_pestana, COLUMNAS_OFICIALES)
+    todos = ws.get_all_values()
+    fila_sheet = indice_df + 2
+    if fila_sheet < 2 or fila_sheet > len(todos):
+        raise IndexError("No se encontró la fila seleccionada en Google Sheets.")
+
+    num_cols = len(COLUMNAS_OFICIALES)
+    fila_actual = todos[fila_sheet - 1]
+    fila_actual = fila_actual[:num_cols] + [""] * max(0, num_cols - len(fila_actual))
+
+    for idx_c, col_name in enumerate(COLUMNAS_OFICIALES):
+        if col_name in datos_actualizados:
+            fila_actual[idx_c] = datos_actualizados[col_name]
+
+    # Registrar auditoría de edición en OBSERVACION si hubo cambios
+    obs_prev = str(fila_actual[32]).strip()
+    nota_ed = f"EDITADO POR {limpiar_valor(usuario_actual)} ({timestamp_str})"
+    if nota_ed not in obs_prev:
+        fila_actual[32] = f"{obs_prev} | {nota_ed}" if obs_prev else nota_ed
+
+    f_edad, f_serv, f_hijos = formulas_fila_personal(fila_sheet)
+    fila_actual[9] = f_edad
+    fila_actual[16] = f_serv
+    fila_actual[52] = f_hijos
+
+    ws.update(range_name=f"A{fila_sheet}:BH{fila_sheet}", values=[fila_actual], value_input_option="USER_ENTERED")
+
+    if nombre_pestana in PESTANAS_ORDENADAS_RANGO:
+        ordenar_pestana_por_rango(nombre_pestana)
+
+    leer_pestana_df.clear()
+
 @st.cache_data(ttl=60)
 def leer_pestana_df(nombre_pestana, columnas_esperadas):
     try:
@@ -341,7 +378,6 @@ def leer_pestana_df(nombre_pestana, columnas_esperadas):
         ]
         df = pd.DataFrame(filas_norm, columns=encabezados)
 
-        # Recalcular en tiempo real contra la fecha de hoy en Panamá para visualización instantánea
         hoy_live = datetime.now(pytz.timezone("America/Panama")).date()
         if nombre_pestana in PESTANAS_UNIDADES and not df.empty:
             if "FECHA_NACIMIENTO" in df.columns and "EDAD" in df.columns:
@@ -433,7 +469,6 @@ def mover_unidad_entre_pestanas(
     obs_previa = str(fila_60[mapa_cols["OBSERVACION"]]).strip()
     fila_60[mapa_cols["OBSERVACION"]] = f"{obs_previa} | {nota_mov}" if obs_previa else nota_mov
 
-    # Asignar fórmulas dinámicas con TODAY() según la fila destino
     fila_dest_num = len(ws_dest.get_all_values()) + 1
     f_edad, f_serv, f_hijos = formulas_fila_personal(fila_dest_num)
     fila_60[mapa_cols["EDAD"]] = f_edad
@@ -501,12 +536,6 @@ def calcular_hijos_fila(m_val, f_val):
     return m_num + f_num
 
 def calcular_alerta_reintegro(fecha_inicio, fecha_fin, estado_tramite, hoy):
-    """
-    Calcula dinámicamente según la fecha de hoy:
-    - Cuántos días lleva de permiso/incapacidad/licencia
-    - Cuántos días le quedan
-    - Cuándo debe reincorporarse (FECHA_FIN + 1 día)
-    """
     est = limpiar_valor(estado_tramite)
     if est == "FINALIZADO":
         return "REINCORPORADO"
@@ -993,7 +1022,6 @@ else:
             unsafe_allow_html=True,
         )
 
-        # Panel automático de alertas y seguimiento diario de novedades vigentes
         df_nov_live = leer_pestana_df(PESTANA_NOVEDADES, COLUMNAS_NOVEDADES)
         if not df_nov_live.empty:
             vigentes_df = df_nov_live[
@@ -1078,7 +1106,6 @@ else:
                         correlativo = max(1, filas_existentes)
                         id_nov = f"NOV-{hoy_pa.year}-{correlativo:03d}"
 
-                        # Fórmulas dinámicas con TODAY() en Google Sheets para que se actualicen cada día solas
                         f_tot_nov, f_rest_nov, f_alerta_nov = formulas_fila_novedad(fila_destino_nov)
                         alerta_live = calcular_alerta_reintegro(nov_f_inicio, nov_f_fin, nov_estado, hoy_pa)
                         usuario_reg = st.session_state.get("usuario_actual", "ADMINISTRADOR")
@@ -1120,13 +1147,13 @@ else:
                         st.error(f"❌ Error al guardar en `{PESTANA_NOVEDADES}`: {e}")
 
     # ==========================================
-    # MÓDULO 4: CONSULTA COMPLETA DE BASES DE DATOS (2 PESTAÑAS PRINCIPALES)
+    # MÓDULO 4: CONSULTA Y EDICIÓN DE BASES DE DATOS
     # ==========================================
     elif modulo_activo == "📊 Consulta de Bases de Datos":
         col_tit, col_btn = st.columns([5, 1])
         with col_tit:
             st.markdown(
-                "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>📊 CONSULTA GENERAL DE BASES DE DATOS</h1>",
+                "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>📊 CONSULTA Y EDICIÓN DE BASES DE DATOS</h1>",
                 unsafe_allow_html=True,
             )
         with col_btn:
@@ -1147,7 +1174,7 @@ else:
                 "📋 Vac.Jubilacion_U.Prestados_U.Trasladados",
             ])
 
-            def renderizar_visor_personal(nombre_hoja, key_prefix):
+            def renderizar_visor_y_editor_personal(nombre_hoja, key_prefix):
                 df_p = leer_pestana_df(nombre_hoja, COLUMNAS_OFICIALES)
                 if df_p.empty:
                     st.info(f"La pestaña **{nombre_hoja}** aún no tiene registros.")
@@ -1156,7 +1183,7 @@ else:
                 st.markdown('<div class="neon-card">', unsafe_allow_html=True)
                 f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
                 busqueda = f1.text_input(
-                    "🔎 Buscar por Cédula, Nombre, Apellido o Posición:",
+                    "🔎 Buscar por Nombre, Apellido, Posición o Cédula:",
                     key=f"{key_prefix}_busq",
                 ).strip().upper()
 
@@ -1198,17 +1225,118 @@ else:
                     key=f"{key_prefix}_dl",
                 )
 
-                st.dataframe(df_filtrado, use_container_width=True, height=520)
+                st.dataframe(df_filtrado, use_container_width=True, height=440)
+
+                # --- BLOQUE DE EDICIÓN RÁPIDA POR NOMBRE, POSICIÓN O CÉDULA ---
+                if not df_filtrado.empty:
+                    st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
+                    st.markdown(
+                        "<h3 style='color: #00ffff;'>✏️ EDITAR REGISTRO DE LA UNIDAD</h3>",
+                        unsafe_allow_html=True,
+                    )
+                    indices_disp = list(df_filtrado.index)
+                    idx_sel_ed = st.selectbox(
+                        "Selecciona la unidad a editar:",
+                        indices_disp,
+                        format_func=lambda idx: (
+                            f"{df_p.loc[idx, 'RANGO']} | POSIC: {df_p.loc[idx, 'POSIC']} | "
+                            f"{df_p.loc[idx, 'NOMBRE']} {df_p.loc[idx, 'APELLIDO']} | "
+                            f"CÉD: {df_p.loc[idx, 'CEDULA']}"
+                        ),
+                        key=f"{key_prefix}_ed_sel",
+                    )
+
+                    fila_ed = df_p.loc[idx_sel_ed]
+                    with st.form(f"form_editar_{key_prefix}_{idx_sel_ed}"):
+                        e1, e2, e3, e4, e5 = st.columns(5)
+                        ed_rango = e1.text_input("RANGO", value=str(fila_ed.get("RANGO", "")))
+                        ed_posic = e2.text_input("POSIC", value=str(fila_ed.get("POSIC", "")))
+                        ed_placa = e3.text_input("PLACA_METALICA", value=str(fila_ed.get("PLACA_METALICA", "")))
+                        ed_nombre = e4.text_input("NOMBRE", value=str(fila_ed.get("NOMBRE", "")))
+                        ed_apellido = e5.text_input("APELLIDO", value=str(fila_ed.get("APELLIDO", "")))
+
+                        e6, e7, e8, e9, e10 = st.columns(5)
+                        ed_cedula = e6.text_input("CEDULA", value=str(fila_ed.get("CEDULA", "")))
+                        ed_fnac = e7.text_input("FECHA_NACIMIENTO (YYYY-MM-DD)", value=str(fila_ed.get("FECHA_NACIMIENTO", "")))
+                        ed_genero = e8.text_input("GENERO", value=str(fila_ed.get("GENERO", "")))
+                        ed_tel = e9.text_input("TELEFONO_PERSONAL", value=str(fila_ed.get("TELEFONO_PERSONAL", "")))
+                        ed_est = e10.text_input("ESTAMENTO", value=str(fila_ed.get("ESTAMENTO", "")))
+
+                        e11, e12, e13, e14, e15 = st.columns(5)
+                        ed_fing = e11.text_input("FECHA_INGRESO (YYYY-MM-DD)", value=str(fila_ed.get("FECHA_INGRESO", "")))
+                        ed_res = e12.text_input("RES_OGD_ASIG", value=str(fila_ed.get("RES_OGD_ASIG", "")))
+                        ed_centro = e13.text_input("ASIGNADO_CENTRO", value=str(fila_ed.get("ASIGNADO_CENTRO", "")))
+                        ed_depto = e14.text_input("DEPARTAMENTO", value=str(fila_ed.get("DEPARTAMENTO", "")))
+                        ed_turno = e15.text_input("TURNO", value=str(fila_ed.get("TURNO", "")))
+
+                        e16, e17, e18, e19, e20 = st.columns(5)
+                        ed_grupo = e16.text_input("GRUPO", value=str(fila_ed.get("GRUPO", "")))
+                        ed_func = e17.text_input("FUNCION", value=str(fila_ed.get("FUNCION", "")))
+                        ed_status = e18.text_input("ESTADO_STATUS", value=str(fila_ed.get("ESTADO_STATUS", "")))
+                        ed_op = e19.text_input("OPERAT_NO_OPERAT", value=str(fila_ed.get("OPERAT_NO_OPERAT", "")))
+                        ed_apto = e20.text_input("APTO_NO_APTO", value=str(fila_ed.get("APTO_NO_APTO", "")))
+
+                        e21, e22, e23, e24 = st.columns(4)
+                        ed_hm = e21.text_input("HIJOS_M", value=str(fila_ed.get("HIJOS_M", "")))
+                        ed_hf = e22.text_input("HIJAS_F", value=str(fila_ed.get("HIJAS_F", "")))
+                        ed_prov = e23.text_input("PROVINCIA", value=str(fila_ed.get("PROVINCIA", "")))
+                        ed_obs = e24.text_input("OBSERVACION", value=str(fila_ed.get("OBSERVACION", "")))
+
+                        guardar_ed = st.form_submit_button(
+                            f"💾 Guardar Cambios en {nombre_hoja}",
+                            use_container_width=True,
+                        )
+
+                        if guardar_ed:
+                            try:
+                                cambios = {
+                                    "RANGO": limpiar_valor(ed_rango),
+                                    "POSIC": limpiar_valor(ed_posic),
+                                    "PLACA_METALICA": limpiar_valor(ed_placa),
+                                    "NOMBRE": limpiar_valor(ed_nombre),
+                                    "APELLIDO": limpiar_valor(ed_apellido),
+                                    "CEDULA": limpiar_valor(ed_cedula),
+                                    "FECHA_NACIMIENTO": limpiar_valor(ed_fnac),
+                                    "GENERO": limpiar_valor(ed_genero),
+                                    "TELEFONO_PERSONAL": limpiar_valor(ed_tel),
+                                    "ESTAMENTO": limpiar_valor(ed_est),
+                                    "FECHA_INGRESO": limpiar_valor(ed_fing),
+                                    "RES_OGD_ASIG": limpiar_valor(ed_res),
+                                    "ASIGNADO_CENTRO": limpiar_valor(ed_centro),
+                                    "DEPARTAMENTO": limpiar_valor(ed_depto),
+                                    "TURNO": limpiar_valor(ed_turno),
+                                    "GRUPO": limpiar_valor(ed_grupo),
+                                    "FUNCION": limpiar_valor(ed_func),
+                                    "ESTADO_STATUS": limpiar_valor(ed_status),
+                                    "OPERAT_NO_OPERAT": limpiar_valor(ed_op),
+                                    "APTO_NO_APTO": limpiar_valor(ed_apto),
+                                    "HIJOS_M": limpiar_valor(ed_hm),
+                                    "HIJAS_F": limpiar_valor(ed_hf),
+                                    "PROVINCIA": limpiar_valor(ed_prov),
+                                    "OBSERVACION": limpiar_valor(ed_obs),
+                                }
+                                actualizar_fila_personal(
+                                    nombre_pestana=nombre_hoja,
+                                    indice_df=int(idx_sel_ed),
+                                    datos_actualizados=cambios,
+                                    usuario_actual=st.session_state.get("usuario_actual", "ADMINISTRADOR"),
+                                    timestamp_str=timestamp_actual,
+                                )
+                                st.success(f"✔️ Datos actualizados en **`{nombre_hoja}`** para **{limpiar_valor(ed_nombre)} {limpiar_valor(ed_apellido)}**.")
+                                st.rerun()
+                            except Exception as e_err:
+                                st.error(f"❌ Error al actualizar el registro: {e_err}")
+
                 st.markdown("</div>", unsafe_allow_html=True)
 
             with sub_tab_1:
-                renderizar_visor_personal(PESTANA_PERSONAL, "recojo")
+                renderizar_visor_y_editor_personal(PESTANA_PERSONAL, "recojo")
 
             with sub_tab_2:
-                renderizar_visor_personal(PESTANA_AGREGADAS, "agregadas")
+                renderizar_visor_y_editor_personal(PESTANA_AGREGADAS, "agregadas")
 
             with sub_tab_3:
-                renderizar_visor_personal(PESTANA_JUB_PRES_TRAS, "jub_pres_tras")
+                renderizar_visor_y_editor_personal(PESTANA_JUB_PRES_TRAS, "jub_pres_tras")
 
         with tab_bd_novedades:
             df_nov = leer_pestana_df(PESTANA_NOVEDADES, COLUMNAS_NOVEDADES)
