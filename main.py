@@ -159,6 +159,7 @@ PESTANA_PERSONAL = "Plan_de_Recojo"
 PESTANA_AGREGADAS = "Unidades_Agregadas"
 PESTANA_JUB_PRES_TRAS = "Vac.Jubilacion_U.Prestados_U.Trasladados"
 PESTANA_NOVEDADES = "Permiso,incapacidad,licencia"
+PESTANA_PARTE_DIARIO = "Parte_Diario_Personal"
 
 PESTANAS_UNIDADES = [
     PESTANA_PERSONAL,
@@ -197,6 +198,15 @@ COLUMNAS_NOVEDADES = [
     "DIAS_TOTALES", "DIAS_RESTANTES", "ESTADO_TRAMITE", "ALERTA_REINTEGRO",
     "NUM_DOCUMENTO_RESPALDO", "ENTIDAD_EMISORA", "AUTORIZADO_POR",
     "OBSERVACION",
+]
+
+# Esquema unificado de 20 columnas de la tabla diaria (A20:T20 en Parte_Diario_Personal)
+COLUMNAS_PARTE_DIARIO = [
+    "ID_REGISTRO", "FECHA_PARTE", "HORA_REGISTRO", "USUARIO_REGISTRO",
+    "CENTRO", "TURNO", "GRUPO_GUARDIA", "DEPARTAMENTO", "RANGO", "POSIC",
+    "NOMBRE", "APELLIDO", "CEDULA", "ESTAMENTO", "ORIGEN_BASE",
+    "ASISTENCIA_TURNO", "MOTIVO_FALTA", "TIPO_NOVEDAD_CRUCE",
+    "DOCUMENTO_RESPALDO", "OBSERVACION",
 ]
 
 JERARQUIA_RANGOS = {
@@ -279,7 +289,12 @@ def conectar_google_sheets():
 
 def obtener_o_crear_worksheet(nombre_pestana, columnas_hdr=None):
     if columnas_hdr is None:
-        columnas_hdr = COLUMNAS_NOVEDADES if nombre_pestana == PESTANA_NOVEDADES else COLUMNAS_OFICIALES
+        if nombre_pestana == PESTANA_NOVEDADES:
+            columnas_hdr = COLUMNAS_NOVEDADES
+        elif nombre_pestana == PESTANA_PARTE_DIARIO:
+            columnas_hdr = COLUMNAS_PARTE_DIARIO
+        else:
+            columnas_hdr = COLUMNAS_OFICIALES
     cliente_gs = conectar_google_sheets()
     libro = cliente_gs.open_by_key(ID_HOJA)
     try:
@@ -345,7 +360,6 @@ def actualizar_fila_personal(nombre_pestana, indice_df, datos_actualizados, usua
         if col_name in datos_actualizados:
             fila_actual[idx_c] = datos_actualizados[col_name]
 
-    # Registrar quién hizo el cambio en USUARIO_REGISTRO (Columna B / índice 1) y TIMESTAMP (Columna A / índice 0)
     fila_actual[0] = timestamp_str
     fila_actual[1] = f"{limpiar_valor(usuario_actual)} (EDITADO {timestamp_str})"
 
@@ -360,6 +374,99 @@ def actualizar_fila_personal(nombre_pestana, indice_df, datos_actualizados, usua
         ordenar_pestana_por_rango(nombre_pestana)
 
     leer_pestana_df.clear()
+
+@st.cache_data(ttl=60)
+def leer_parte_diario_df():
+    """
+    Lee únicamente la tabla transaccional de Parte_Diario_Personal (fila 20 encabezados, filas 21+ datos),
+    preservando intacto el tablero ejecutivo superior (A1:T19).
+    """
+    try:
+        ws = obtener_o_crear_worksheet(PESTANA_PARTE_DIARIO, COLUMNAS_PARTE_DIARIO)
+        valores = ws.get_all_values()
+        if not valores or len(valores) < 20:
+            return pd.DataFrame(columns=COLUMNAS_PARTE_DIARIO)
+
+        encabezados = [str(h).strip() for h in valores[19][:len(COLUMNAS_PARTE_DIARIO)]]
+        if encabezados != COLUMNAS_PARTE_DIARIO:
+            encabezados = COLUMNAS_PARTE_DIARIO
+
+        filas_raw = valores[20:]
+        num_cols = len(COLUMNAS_PARTE_DIARIO)
+        filas_limpias = []
+        for idx_offset, f in enumerate(filas_raw):
+            f_norm = f[:num_cols] + [""] * max(0, num_cols - len(f))
+            if any(str(c).strip() != "" for c in f_norm):
+                filas_limpias.append((21 + idx_offset, f_norm))
+
+        if not filas_limpias:
+            return pd.DataFrame(columns=COLUMNAS_PARTE_DIARIO)
+
+        df = pd.DataFrame([x[1] for x in filas_limpias], columns=COLUMNAS_PARTE_DIARIO)
+        df["_ROW_SHEET"] = [x[0] for x in filas_limpias]
+        return df
+    except Exception as e:
+        st.error(f"❌ Error al leer `{PESTANA_PARTE_DIARIO}`: {e}")
+        return pd.DataFrame(columns=COLUMNAS_PARTE_DIARIO)
+
+def guardar_lote_parte_diario(filas_nuevas):
+    """
+    Inserta múltiples filas de parte diario en Parte_Diario_Personal (a partir de fila 21),
+    actualizando también la fecha de consulta A5 en el tablero superior y evitando duplicados exactos
+    de (FECHA_PARTE + CENTRO + TURNO + CEDULA/POSIC).
+    """
+    if not filas_nuevas:
+        return 0, 0
+
+    ws = obtener_o_crear_worksheet(PESTANA_PARTE_DIARIO, COLUMNAS_PARTE_DIARIO)
+    valores = ws.get_all_values()
+
+    claves_existentes = set()
+    ultima_fila_ocupada = 20
+    for r_idx in range(20, len(valores)):
+        fila_v = valores[r_idx]
+        if any(str(c).strip() != "" for c in fila_v[:20]):
+            ultima_fila_ocupada = r_idx + 1
+            f_part = str(fila_v[1]).strip() if len(fila_v) > 1 else ""
+            cen_p = str(fila_v[4]).strip().upper() if len(fila_v) > 4 else ""
+            tur_p = str(fila_v[5]).strip().upper() if len(fila_v) > 5 else ""
+            pos_p = str(fila_v[9]).strip().upper() if len(fila_v) > 9 else ""
+            ced_p = str(fila_v[12]).strip().upper() if len(fila_v) > 12 else ""
+            claves_existentes.add((f_part, cen_p, tur_p, ced_p or pos_p))
+
+    filas_a_insertar = []
+    omitidas = 0
+    for f_n in filas_nuevas:
+        clave = (
+            str(f_n[1]).strip(),
+            str(f_n[4]).strip().upper(),
+            str(f_n[5]).strip().upper(),
+            (str(f_n[12]).strip().upper() or str(f_n[9]).strip().upper()),
+        )
+        if clave in claves_existentes:
+            omitidas += 1
+            continue
+        claves_existentes.add(clave)
+        filas_a_insertar.append(f_n)
+
+    if filas_a_insertar:
+        fila_inicio = ultima_fila_ocupada + 1
+        fila_fin = fila_inicio + len(filas_a_insertar) - 1
+        ws.update(
+            range_name=f"A{fila_inicio}:T{fila_fin}",
+            values=filas_a_insertar,
+            value_input_option="USER_ENTERED",
+        )
+        # Sincronizar fecha de consulta A5 del tablero gerencial con la primera fecha reportada
+        ws.update(range_name="A5", values=[[str(filas_a_insertar[0][1])]], value_input_option="USER_ENTERED")
+
+    leer_parte_diario_df.clear()
+    return len(filas_a_insertar), omitidas
+
+def actualizar_fila_parte_diario(row_sheet, fila_20):
+    ws = obtener_o_crear_worksheet(PESTANA_PARTE_DIARIO, COLUMNAS_PARTE_DIARIO)
+    ws.update(range_name=f"A{row_sheet}:T{row_sheet}", values=[fila_20], value_input_option="USER_ENTERED")
+    leer_parte_diario_df.clear()
 
 @st.cache_data(ttl=60)
 def leer_pestana_df(nombre_pestana, columnas_esperadas):
@@ -512,6 +619,10 @@ def limpiar_valor(val):
         s = s[:-2]
     return s.upper()
 
+def normalizar_centro_parte(val):
+    s = limpiar_valor(val).replace("/", "")
+    return s
+
 def parsear_fecha_simple(val):
     if es_placeholder_vacio(val):
         return None
@@ -563,6 +674,41 @@ def calcular_alerta_reintegro(fecha_inicio, fecha_fin, estado_tramite, hoy):
         f"QUEDAN {dias_quedan} · REINCORPORA EL {reintegro_str}"
     )
 
+def buscar_novedad_activa_unidad(df_nov, cedula, posic, fecha_eval):
+    """
+    Cruza en tiempo real una unidad contra Permiso,incapacidad,licencia para saber
+    si tiene un permiso, incapacidad o licencia VIGENTE/PRORROGADO en `fecha_eval`.
+    """
+    if df_nov.empty:
+        return None
+    ced_u = limpiar_valor(cedula)
+    pos_u = limpiar_valor(posic)
+    for _, row_n in df_nov.iterrows():
+        est_t = limpiar_valor(row_n.get("ESTADO_TRAMITE", ""))
+        if est_t not in ("VIGENTE", "PRORROGADO"):
+            continue
+        ced_n = limpiar_valor(row_n.get("CEDULA", ""))
+        pos_n = limpiar_valor(row_n.get("POSIC", ""))
+        coincide = (ced_u and ced_n and ced_u == ced_n) or (pos_u and pos_n and pos_u == pos_n)
+        if not coincide:
+            continue
+        f_ini = parsear_fecha_simple(row_n.get("FECHA_INICIO", ""))
+        f_fin = parsear_fecha_simple(row_n.get("FECHA_FIN", ""))
+        if f_ini and f_fin and f_ini <= fecha_eval <= f_fin:
+            tipo_n = limpiar_valor(row_n.get("TIPO_NOVEDAD", "PERMISO"))
+            motivo_map = {
+                "INCAPACIDAD": "INCAPACITADO",
+                "PERMISO": "PERMISO",
+                "LICENCIA": "LICENCIA",
+            }
+            return {
+                "motivo_falta": motivo_map.get(tipo_n, tipo_n or "PERMISO"),
+                "tipo_cruce": f"{tipo_n} VIGENTE ({limpiar_valor(row_n.get('SUBTIPO_MOTIVO', ''))})".strip(),
+                "doc": limpiar_valor(row_n.get("NUM_DOCUMENTO_RESPALDO", "")),
+                "obs": f"CRUZADO AUTOMÁTICAMENTE CON {limpiar_valor(row_n.get('ID_NOVEDAD', ''))}",
+            }
+    return None
+
 # --- 2. ESTADOS DE SESIÓN ---
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
@@ -588,6 +734,7 @@ def pantalla_login():
             "ALISJHON": "199432",
             "ALBERTO AYALA": "24561",
             "DANILO SMITH": "49431",
+            "YANILKA RODRIGUEZ": "142012",
         }
 
         with st.form("login_form"):
@@ -622,12 +769,23 @@ else:
     ]
     lista_estamentos = ["SELECCIONAR", "P.N", "SENAFRONT", "SENAN", "MINSEG", "MNJ"]
     lista_centros = ["SELECCIONAR", "CON", "CORCOL", "COMCH", "COMDA", "COMAR", "COMSAM", "COMCHEP", "CEVIBO"]
+    lista_centros_8 = ["CON", "CORCOL", "COMCH", "COMDA", "COMAR", "COMSAM", "COMCHEP", "CEVIBO"]
     lista_departamentos = [
         "SELECCIONAR", "DIRECCION", "SUPERVISORA ADM", "PLANEAMIENTO",
         "COOR. TECNOLOGICO", "OPERACIONES", "ESTADISTICA", "RECURSOS HUMANOS",
         "CLL-104", "VIDEO SEGURIDAD", "DESPACHO",
     ]
     lista_turnos = ["SELECCIONAR", "4X4", "5X2", "7X7", "20X20", "24X24", "ROTATIVO", "ADMINISTRATIVO"]
+    lista_turnos_parte = [
+        "DIURNO (07:00-19:00)",
+        "NOCTURNO (19:00-07:00)",
+        "ADMINISTRATIVO (5X2)",
+    ]
+    lista_motivos_falta = [
+        "N/A", "PERMISO", "INCAPACITADO", "LICENCIA", "COMISIÓN",
+        "ATENCIÓN MÉDICA", "HOSPITALIZADO", "VAC. NORMALES",
+        "VAC. PENDIENTES", "VAC. X PRESCRI. MÉDICA",
+    ]
     lista_sangre = ["SELECCIONAR", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
     lista_provincias = [
         "SELECCIONAR", "PANAMÁ", "PANAMÁ OESTE", "COLÓN", "CHIRIQUÍ", "VERAGUAS",
@@ -674,6 +832,7 @@ else:
                 "➕ Registro Individual",
                 "🔄 Movimiento de Unidades",
                 "🩺 Permisos, Incapacidades y Licencias",
+                "📋 Parte Diario de Personal",
                 "📊 Consulta de Bases de Datos",
             ],
             label_visibility="collapsed",
@@ -687,6 +846,7 @@ else:
     tz_pa = pytz.timezone("America/Panama")
     ahora_pa = datetime.now(tz_pa)
     hoy_pa = ahora_pa.date()
+    hora_actual_pa = ahora_pa.strftime("%H:%M")
     timestamp_actual = ahora_pa.strftime("%Y-%m-%d %H:%M:%S")
 
     # ==========================================
@@ -1145,7 +1305,444 @@ else:
                         st.error(f"❌ Error al guardar en `{PESTANA_NOVEDADES}`: {e}")
 
     # ==========================================
-    # MÓDULO 4: CONSULTA Y EDICIÓN DE BASES DE DATOS
+    # MÓDULO 4: PARTE DIARIO DE PERSONAL (MOTOR HÍBRIDO DE GUARDIA Y RELEVO)
+    # ==========================================
+    elif modulo_activo == "📋 Parte Diario de Personal":
+        col_pt1, col_pt2 = st.columns([5, 1])
+        with col_pt1:
+            st.markdown(
+                "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>📋 PARTE DIARIO DE PERSONAL Y CONTROL DE GUARDIA</h1>",
+                unsafe_allow_html=True,
+            )
+        with col_pt2:
+            st.write("")
+            if st.button("🔄 Sincronizar", use_container_width=True, key="btn_sync_parte"):
+                leer_parte_diario_df.clear()
+                leer_pestana_df.clear()
+                st.rerun()
+
+        tab_pd_registro, tab_pd_tablero = st.tabs([
+            "⚡ 1. REGISTRO INTELIGENTE DE GUARDIA (1 DÍA O CICLO DE VARIOS DÍAS)",
+            "📊 2. TABLERO NACIONAL Y AJUSTE PUNTUAL DE DÍA",
+        ])
+
+        # Consolidar personal activo (Plan_de_Recojo + Unidades_Agregadas)
+        df_rec_act = leer_pestana_df(PESTANA_PERSONAL, COLUMNAS_OFICIALES).copy()
+        if not df_rec_act.empty:
+            df_rec_act["_ORIGEN"] = PESTANA_PERSONAL
+        df_agr_act = leer_pestana_df(PESTANA_AGREGADAS, COLUMNAS_OFICIALES).copy()
+        if not df_agr_act.empty:
+            df_agr_act["_ORIGEN"] = PESTANA_AGREGADAS
+
+        df_activos_maestro = pd.concat([df_rec_act, df_agr_act], ignore_index=True)
+        if not df_activos_maestro.empty:
+            df_activos_maestro["_CENTRO_NORM"] = df_activos_maestro["ASIGNADO_CENTRO"].apply(normalizar_centro_parte)
+            df_activos_maestro["_GRUPO_NORM"] = df_activos_maestro["GRUPO"].apply(limpiar_valor)
+
+        df_novedades_cruce = leer_pestana_df(PESTANA_NOVEDADES, COLUMNAS_NOVEDADES)
+
+        with tab_pd_registro:
+            st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+            st.markdown(
+                "<h3 style='color: #00ffff; margin-top: 0;'>1. Parámetros del Turno y Ciclo de Guardia</h3>",
+                unsafe_allow_html=True,
+            )
+
+            p1, p2, p3, p4 = st.columns(4)
+            pd_centro = p1.selectbox("Centro Operativo *", lista_centros_8, key="pd_centro_sel")
+            pd_turno = p2.selectbox("Turno de Servicio *", lista_turnos_parte, key="pd_turno_sel")
+
+            grupos_disponibles = ["TODOS"]
+            if not df_activos_maestro.empty:
+                sub_cen = df_activos_maestro[df_activos_maestro["_CENTRO_NORM"] == pd_centro]
+                grps = sorted([g for g in sub_cen["_GRUPO_NORM"].unique() if g != ""])
+                grupos_disponibles = ["TODOS"] + grps
+
+            pd_grupo = p3.selectbox("Grupo de Guardia *", grupos_disponibles, key="pd_grupo_sel")
+            pd_fase_relevo = p4.selectbox(
+                "Fase de Relevo / Guardia:",
+                [
+                    "ENTRANTE (DÍA 1 DE TURNO)",
+                    "CONTINUIDAD DE TURNO (DÍA INTERMEDIO)",
+                    "AMANECIENDO / SALIENTE (ENTREGA DE TURNO)",
+                ],
+                key="pd_fase_sel",
+            )
+
+            d1, d2, d3, d4 = st.columns(4)
+            pd_fecha_ini = d1.date_input("Fecha Inicio del Parte *", value=hoy_pa, key="pd_f_ini")
+            pd_dias_ciclo = d2.number_input(
+                "Días consecutivos a proyectar (ej. 1 o 5 días):",
+                min_value=1,
+                max_value=15,
+                value=1,
+                step=1,
+                key="pd_dias_ciclo",
+            )
+            pd_fecha_fin = pd_fecha_ini + timedelta(days=int(pd_dias_ciclo) - 1)
+            d3.text_input(
+                "Fecha Fin del Ciclo (calculada):",
+                value=pd_fecha_fin.strftime("%Y-%m-%d"),
+                disabled=True,
+            )
+            pd_grupo_saliente = d4.text_input(
+                "Grupo Saliente / Amaneciendo (opcional):",
+                key="pd_grp_saliente",
+            )
+
+            # Filtrar unidades activas del centro y grupo seleccionados
+            if df_activos_maestro.empty:
+                st.warning("⚠️ No hay registros activos cargados en `Plan_de_Recojo` ni `Unidades_Agregadas`.")
+            else:
+                df_guardia = df_activos_maestro[df_activos_maestro["_CENTRO_NORM"] == pd_centro].copy()
+                if pd_grupo != "TODOS":
+                    df_guardia = df_guardia[df_guardia["_GRUPO_NORM"] == pd_grupo]
+
+                # Selector opcional para sumar unidades de apoyo de otro grupo del mismo centro
+                df_apoyo_pool = df_activos_maestro[
+                    (df_activos_maestro["_CENTRO_NORM"] == pd_centro)
+                    & (~df_activos_maestro.index.isin(df_guardia.index))
+                ]
+                if not df_apoyo_pool.empty:
+                    apoyo_indices = st.multiselect(
+                        "➕ Sumar unidades de apoyo temporal al turno (opcional):",
+                        options=list(df_apoyo_pool.index),
+                        format_func=lambda i: (
+                            f"{df_activos_maestro.loc[i, 'RANGO']} {df_activos_maestro.loc[i, 'NOMBRE']} "
+                            f"{df_activos_maestro.loc[i, 'APELLIDO']} (POSIC: {df_activos_maestro.loc[i, 'POSIC']} · "
+                            f"GRUPO: {df_activos_maestro.loc[i, 'GRUPO']})"
+                        ),
+                        key="pd_apoyo_extra",
+                    )
+                    if apoyo_indices:
+                        df_guardia = pd.concat(
+                            [df_guardia, df_activos_maestro.loc[apoyo_indices]],
+                            ignore_index=False,
+                        )
+
+                if df_guardia.empty:
+                    st.info(
+                        f"No se encontraron unidades activas en **{pd_centro}** para el grupo **{pd_grupo}**. "
+                        "Prueba seleccionando `TODOS` en Grupo de Guardia."
+                    )
+                else:
+                    # Construir tabla editable con cruce automático contra Permiso,incapacidad,licencia para la fecha inicio
+                    filas_editor = []
+                    for _, u_row in df_guardia.iterrows():
+                        nov_hit = buscar_novedad_activa_unidad(
+                            df_novedades_cruce,
+                            u_row.get("CEDULA", ""),
+                            u_row.get("POSIC", ""),
+                            pd_fecha_ini,
+                        )
+                        asist_def = "FALTO" if nov_hit else "PRESENTE"
+                        motivo_def = nov_hit["motivo_falta"] if nov_hit else "N/A"
+                        cruce_def = nov_hit["tipo_cruce"] if nov_hit else ""
+                        doc_def = nov_hit["doc"] if nov_hit else ""
+                        obs_def = nov_hit["obs"] if nov_hit else ""
+
+                        filas_editor.append({
+                            "INCLUIR": True,
+                            "RANGO": limpiar_valor(u_row.get("RANGO", "")),
+                            "POSIC": limpiar_valor(u_row.get("POSIC", "")),
+                            "NOMBRE": limpiar_valor(u_row.get("NOMBRE", "")),
+                            "APELLIDO": limpiar_valor(u_row.get("APELLIDO", "")),
+                            "CEDULA": limpiar_valor(u_row.get("CEDULA", "")),
+                            "ESTAMENTO": limpiar_valor(u_row.get("ESTAMENTO", "")),
+                            "DEPARTAMENTO": limpiar_valor(u_row.get("DEPARTAMENTO", "")),
+                            "ORIGEN_BASE": u_row.get("_ORIGEN", PESTANA_PERSONAL),
+                            "ASISTENCIA_TURNO": asist_def,
+                            "MOTIVO_FALTA": motivo_def,
+                            "TIPO_NOVEDAD_CRUCE": cruce_def,
+                            "DOCUMENTO_RESPALDO": doc_def,
+                            "OBSERVACION": obs_def,
+                        })
+
+                    df_ed_base = pd.DataFrame(filas_editor)
+                    n_cruzados = int((df_ed_base["ASISTENCIA_TURNO"] == "FALTO").sum())
+                    st.markdown(
+                        f"**Unidades cargadas para {pd_centro} ({pd_grupo}):** `{len(df_ed_base)}` unidades · "
+                        f"**Faltos detectados automáticamente por Permiso/Incapacidad vigente:** `{n_cruzados}`"
+                    )
+
+                    editor_key = f"ed_parte_{pd_centro}_{pd_grupo}_{pd_fecha_ini}"
+                    df_editado = st.data_editor(
+                        df_ed_base,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=420,
+                        key=editor_key,
+                        column_config={
+                            "INCLUIR": st.column_config.CheckboxColumn("En Turno", default=True),
+                            "RANGO": st.column_config.TextColumn("Rango", disabled=True),
+                            "POSIC": st.column_config.TextColumn("Posic.", disabled=True),
+                            "NOMBRE": st.column_config.TextColumn("Nombre", disabled=True),
+                            "APELLIDO": st.column_config.TextColumn("Apellido", disabled=True),
+                            "CEDULA": st.column_config.TextColumn("Cédula", disabled=True),
+                            "ESTAMENTO": st.column_config.TextColumn("Estamento", disabled=True),
+                            "DEPARTAMENTO": st.column_config.TextColumn("Departamento"),
+                            "ORIGEN_BASE": st.column_config.TextColumn("Origen", disabled=True),
+                            "ASISTENCIA_TURNO": st.column_config.SelectboxColumn(
+                                "Asistencia *",
+                                options=["PRESENTE", "FALTO"],
+                                required=True,
+                            ),
+                            "MOTIVO_FALTA": st.column_config.SelectboxColumn(
+                                "Motivo Falta",
+                                options=lista_motivos_falta,
+                                required=True,
+                            ),
+                            "TIPO_NOVEDAD_CRUCE": st.column_config.TextColumn("Detalle Novedad"),
+                            "DOCUMENTO_RESPALDO": st.column_config.TextColumn("Doc. Respaldo"),
+                            "OBSERVACION": st.column_config.TextColumn("Observación"),
+                        },
+                    )
+
+                    df_confirmados = df_editado[df_editado["INCLUIR"] == True].copy()
+                    tot_prog = len(df_confirmados)
+                    tot_pres = int((df_confirmados["ASISTENCIA_TURNO"] == "PRESENTE").sum())
+                    tot_falt = int((df_confirmados["ASISTENCIA_TURNO"] == "FALTO").sum())
+                    pct_cob = (tot_pres / tot_prog * 100.0) if tot_prog > 0 else 0.0
+
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("Efectivo Programado / Día", f"{tot_prog}")
+                    m2.metric("Presentes en Puesto", f"{tot_pres}")
+                    m3.metric("Faltos de Servicio", f"{tot_falt}")
+                    m4.metric("% Cobertura Estimada", f"{pct_cob:.1f}%")
+
+                    btn_lbl = (
+                        f"💾 Guardar Parte Diario ({pd_fecha_ini.strftime('%Y-%m-%d')})"
+                        if int(pd_dias_ciclo) == 1
+                        else f"💾 Proyectar y Guardar Ciclo Completo ({int(pd_dias_ciclo)} días: {pd_fecha_ini} al {pd_fecha_fin})"
+                    )
+
+                    if st.button(btn_lbl, use_container_width=True, key="btn_guardar_parte_diario"):
+                        if df_confirmados.empty:
+                            st.error("❌ Debes mantener al menos una unidad marcada en 'En Turno'.")
+                        else:
+                            try:
+                                usuario_reg = limpiar_valor(st.session_state.get("usuario_actual", "ADMINISTRADOR"))
+                                grupo_etiqueta = (
+                                    f"GRUPO {pd_grupo}" if pd_grupo != "TODOS" and not str(pd_grupo).startswith("GRUPO")
+                                    else str(pd_grupo)
+                                )
+                                filas_batch = []
+                                sec_counter = 1
+
+                                for d_offset in range(int(pd_dias_ciclo)):
+                                    fecha_dia = pd_fecha_ini + timedelta(days=d_offset)
+                                    fecha_dia_str = fecha_dia.strftime("%Y-%m-%d")
+                                    etiqueta_dia = (
+                                        f"DÍA {d_offset + 1}/{int(pd_dias_ciclo)} · {pd_fase_relevo}"
+                                        if int(pd_dias_ciclo) > 1
+                                        else pd_fase_relevo
+                                    )
+                                    if limpiar_valor(pd_grupo_saliente):
+                                        etiqueta_dia = f"{etiqueta_dia} · RELEVA A {limpiar_valor(pd_grupo_saliente)}"
+
+                                    for _, r_u in df_confirmados.iterrows():
+                                        asist_u = limpiar_valor(r_u["ASISTENCIA_TURNO"]) or "PRESENTE"
+                                        motivo_u = limpiar_valor(r_u["MOTIVO_FALTA"]) or ("N/A" if asist_u == "PRESENTE" else "PERMISO")
+                                        cruce_u = limpiar_valor(r_u["TIPO_NOVEDAD_CRUCE"])
+                                        doc_u = limpiar_valor(r_u["DOCUMENTO_RESPALDO"])
+                                        obs_u = limpiar_valor(r_u["OBSERVACION"])
+
+                                        # En proyección multi-día (d_offset > 0), revalidar en vivo si una incapacidad venció o inició ese día
+                                        if d_offset > 0:
+                                            nov_dia = buscar_novedad_activa_unidad(
+                                                df_novedades_cruce,
+                                                r_u["CEDULA"],
+                                                r_u["POSIC"],
+                                                fecha_dia,
+                                            )
+                                            if nov_dia:
+                                                asist_u = "FALTO"
+                                                motivo_u = nov_dia["motivo_falta"]
+                                                cruce_u = nov_dia["tipo_cruce"]
+                                                doc_u = nov_dia["doc"]
+                                                obs_u = nov_dia["obs"]
+                                            elif "CRUZADO AUTOMÁTICAMENTE" in obs_u:
+                                                # Si ya venció su incapacidad/permiso en este día posterior, vuelve a PRESENTE
+                                                asist_u = "PRESENTE"
+                                                motivo_u = "N/A"
+                                                cruce_u = ""
+                                                doc_u = ""
+                                                obs_u = "REINCORPORADO AUTOMÁTICAMENTE AL VENCER NOVEDAD"
+
+                                        if asist_u == "PRESENTE":
+                                            motivo_u = "N/A"
+
+                                        obs_final = f"{etiqueta_dia} | {obs_u}" if obs_u else etiqueta_dia
+                                        id_reg = f"PD-{fecha_dia.strftime('%Y%m%d')}-{pd_centro}-{sec_counter:03d}"
+                                        sec_counter += 1
+
+                                        filas_batch.append([
+                                            id_reg,
+                                            fecha_dia_str,
+                                            hora_actual_pa,
+                                            usuario_reg,
+                                            pd_centro,
+                                            pd_turno,
+                                            grupo_etiqueta,
+                                            limpiar_valor(r_u["DEPARTAMENTO"]),
+                                            limpiar_valor(r_u["RANGO"]),
+                                            limpiar_valor(r_u["POSIC"]),
+                                            limpiar_valor(r_u["NOMBRE"]),
+                                            limpiar_valor(r_u["APELLIDO"]),
+                                            limpiar_valor(r_u["CEDULA"]),
+                                            limpiar_valor(r_u["ESTAMENTO"]),
+                                            str(r_u["ORIGEN_BASE"]),
+                                            asist_u,
+                                            motivo_u,
+                                            cruce_u,
+                                            doc_u,
+                                            obs_final,
+                                        ])
+
+                                insertadas, omitidas = guardar_lote_parte_diario(filas_batch)
+                                if insertadas > 0:
+                                    msg_ok = (
+                                        f"✔️ Se guardaron **{insertadas}** registros en **`{PESTANA_PARTE_DIARIO}`** "
+                                        f"para **{pd_centro}** ({pd_fecha_ini} al {pd_fecha_fin})."
+                                    )
+                                    if omitidas > 0:
+                                        msg_ok += f" ({omitidas} registros ya existentes fueron omitidos para evitar duplicados)."
+                                    st.success(msg_ok)
+                                else:
+                                    st.warning("⚠️ Todos los registros seleccionados ya estaban reportados para esa fecha, centro y turno.")
+                            except Exception as e_pd:
+                                st.error(f"❌ Error al guardar el Parte Diario: {e_pd}")
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with tab_pd_tablero:
+            df_pd_hist = leer_parte_diario_df()
+            st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+
+            if df_pd_hist.empty:
+                st.info(f"La pestaña **`{PESTANA_PARTE_DIARIO}`** aún no tiene registros cargados.")
+            else:
+                fechas_disp = sorted([f for f in df_pd_hist["FECHA_PARTE"].unique() if str(f).strip() != ""], reverse=True)
+                f_c1, f_c2, f_c3 = st.columns([1, 1, 2])
+                fecha_vista = f_c1.selectbox("📅 Fecha de Consulta:", fechas_disp, key="pd_vista_fecha")
+                centro_vista = f_c2.selectbox("🏢 Filtrar Centro:", ["TODOS"] + lista_centros_8, key="pd_vista_centro")
+                busq_pd_vista = f_c3.text_input("🔎 Buscar unidad (Nombre, Apellido, Posic. o Cédula):", key="pd_vista_busq").strip().upper()
+
+                df_dia = df_pd_hist[df_pd_hist["FECHA_PARTE"] == fecha_vista].copy()
+
+                # KPIs Nacionales de la fecha seleccionada
+                tot_d = len(df_dia)
+                pres_d = int((df_dia["ASISTENCIA_TURNO"].str.upper() == "PRESENTE").sum())
+                falt_d = int((df_dia["ASISTENCIA_TURNO"].str.upper() == "FALTO").sum())
+                cob_d = (pres_d / tot_d * 100.0) if tot_d > 0 else 0.0
+                centros_rep = df_dia["CENTRO"].str.upper().nunique()
+
+                k1, k2, k3, k4, k5 = st.columns(5)
+                k1.metric("Efectivo Programado", f"{tot_d}")
+                k2.metric("Presentes", f"{pres_d}")
+                k3.metric("Faltos", f"{falt_d}")
+                k4.metric("% Cobertura", f"{cob_d:.1f}%")
+                k5.metric("Centros Reportados", f"{centros_rep} / 8")
+
+                # Tabla resumen por los 8 centros
+                resumen_centros = []
+                for c_nom in lista_centros_8:
+                    sub_c = df_dia[df_dia["CENTRO"].str.upper() == c_nom]
+                    ef_c = len(sub_c)
+                    pr_c = int((sub_c["ASISTENCIA_TURNO"].str.upper() == "PRESENTE").sum())
+                    fa_c = int((sub_c["ASISTENCIA_TURNO"].str.upper() == "FALTO").sum())
+                    resumen_centros.append({
+                        "CENTRO": c_nom,
+                        "P.N": int((sub_c["ESTAMENTO"].str.upper() == "P.N").sum()),
+                        "SENAFRONT": int((sub_c["ESTAMENTO"].str.upper() == "SENAFRONT").sum()),
+                        "SENAN": int((sub_c["ESTAMENTO"].str.upper() == "SENAN").sum()),
+                        "MNJ": int((sub_c["ESTAMENTO"].str.upper() == "MNJ").sum()),
+                        "MINSEG": int((sub_c["ESTAMENTO"].str.upper() == "MINSEG").sum()),
+                        "EFECTIVO": ef_c,
+                        "PRESENTES": pr_c,
+                        "FALTOS": fa_c,
+                        "% COBERTURA": f"{(pr_c / ef_c * 100.0):.1f}%" if ef_c > 0 else "0.0%",
+                        "ESTADO": "REPORTADO" if ef_c > 0 else "PENDIENTE",
+                    })
+                st.markdown("**Resumen Nacional por Centro y Estamento:**")
+                st.dataframe(pd.DataFrame(resumen_centros), use_container_width=True, hide_index=True)
+
+                # Filtrar detalle nominal
+                df_det = df_dia.copy()
+                if centro_vista != "TODOS":
+                    df_det = df_det[df_det["CENTRO"].str.upper() == centro_vista]
+                if busq_pd_vista:
+                    mask_pd = (
+                        df_det["NOMBRE"].str.upper().str.contains(busq_pd_vista, na=False)
+                        | df_det["APELLIDO"].str.upper().str.contains(busq_pd_vista, na=False)
+                        | df_det["POSIC"].str.upper().str.contains(busq_pd_vista, na=False)
+                        | df_det["CEDULA"].str.upper().str.contains(busq_pd_vista, na=False)
+                    )
+                    df_det = df_det[mask_pd]
+
+                cols_mostrar_pd = [c for c in COLUMNAS_PARTE_DIARIO if c in df_det.columns]
+                c_inf_pd, c_dl_pd = st.columns([4, 1])
+                c_inf_pd.markdown(f"**Detalle nominal del día `{fecha_vista}`:** `{len(df_det)}` registros")
+                c_dl_pd.download_button(
+                    label="📥 Descargar Excel",
+                    data=convertir_df_a_excel(df_det[cols_mostrar_pd], f"Parte_{fecha_vista}"),
+                    file_name=f"Parte_Diario_{fecha_vista}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="dl_parte_dia",
+                )
+                st.dataframe(df_det[cols_mostrar_pd], use_container_width=True, height=380)
+
+                # Ajuste puntual si surge una novedad en medio de un ciclo de varios días
+                if busq_pd_vista != "" and not df_det.empty:
+                    st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
+                    st.markdown("<h3 style='color: #00ffff;'>✏️ AJUSTE PUNTUAL DE ASISTENCIA / NOVEDAD DEL DÍA</h3>", unsafe_allow_html=True)
+                    idx_pd_sel = st.selectbox(
+                        "Selecciona el registro del día a actualizar:",
+                        list(df_det.index),
+                        format_func=lambda idx: (
+                            f"{df_det.loc[idx, 'ID_REGISTRO']} | {df_det.loc[idx, 'CENTRO']} | "
+                            f"{df_det.loc[idx, 'RANGO']} {df_det.loc[idx, 'NOMBRE']} {df_det.loc[idx, 'APELLIDO']} "
+                            f"({df_det.loc[idx, 'ASISTENCIA_TURNO']})"
+                        ),
+                        key=f"sel_ajuste_pd_{fecha_vista}_{busq_pd_vista}",
+                    )
+                    reg_pd = df_det.loc[idx_pd_sel]
+                    with st.form(f"form_ajuste_pd_{idx_pd_sel}_{busq_pd_vista}"):
+                        a1, a2, a3, a4 = st.columns(4)
+                        aj_asist = a1.selectbox(
+                            "ASISTENCIA_TURNO",
+                            ["PRESENTE", "FALTO"],
+                            index=0 if str(reg_pd["ASISTENCIA_TURNO"]).upper() == "PRESENTE" else 1,
+                        )
+                        mot_act = str(reg_pd["MOTIVO_FALTA"]).upper()
+                        aj_motivo = a2.selectbox(
+                            "MOTIVO_FALTA",
+                            lista_motivos_falta,
+                            index=lista_motivos_falta.index(mot_act) if mot_act in lista_motivos_falta else 0,
+                        )
+                        aj_doc = a3.text_input("DOCUMENTO_RESPALDO", value=str(reg_pd["DOCUMENTO_RESPALDO"]))
+                        aj_obs = a4.text_input("OBSERVACION", value=str(reg_pd["OBSERVACION"]))
+
+                        if st.form_submit_button("💾 Actualizar Registro del Día", use_container_width=True):
+                            try:
+                                fila_act_20 = [str(reg_pd[c]) for c in COLUMNAS_PARTE_DIARIO]
+                                fila_act_20[2] = hora_actual_pa
+                                fila_act_20[3] = limpiar_valor(st.session_state.get("usuario_actual", "ADMINISTRADOR"))
+                                fila_act_20[15] = aj_asist
+                                fila_act_20[16] = "N/A" if aj_asist == "PRESENTE" else aj_motivo
+                                fila_act_20[18] = limpiar_valor(aj_doc)
+                                fila_act_20[19] = limpiar_valor(aj_obs)
+                                actualizar_fila_parte_diario(int(reg_pd["_ROW_SHEET"]), fila_act_20)
+                                st.success("✔️ Registro del Parte Diario actualizado.")
+                                st.rerun()
+                            except Exception as e_aj:
+                                st.error(f"❌ Error al actualizar: {e_aj}")
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    # ==========================================
+    # MÓDULO 5: CONSULTA Y EDICIÓN DE BASES DE DATOS
     # ==========================================
     elif modulo_activo == "📊 Consulta de Bases de Datos":
         col_tit, col_btn = st.columns([5, 1])
