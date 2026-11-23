@@ -3,6 +3,7 @@ import pandas as pd
 import glob
 import base64
 import re
+import unicodedata
 from io import BytesIO
 from datetime import datetime, date, timedelta
 import pytz
@@ -269,6 +270,7 @@ DASH_CENTROS_OFICIALES = [
     "CON", "CORCOL", "COMCH", "COMDA", "COMAR", "COMSAM", "COMCHEP", "CEVIBO",
 ]
 DASH_ESTAMENTOS_OFICIALES = ["PNP", "SENAN", "SENAFRONT", "MINSEG", "MNJ"]
+DASH_ESTAMENTOS_JUBILACION = ["PNP", "SENAFRONT", "SENAN", "MINSEG", "MNJ"]
 DASH_RANGOS_OFICIALES = [
     "COMISIONADO", "SUBCOMISIONADO", "MAYOR", "CAPITÁN", "TENIENTE",
     "SUBTENIENTE", "SARGENTO 1º", "SARGENTO 2º", "CABO 1º", "CABO 2º",
@@ -289,6 +291,7 @@ DASH_MAPA_CENTROS = {
     "COMDA": "COMDA",
     "COM/DA": "COMDA",
     "COM DA": "COMDA",
+    "CALLE B SUR DAVID": "COMDA",
     "COMAR": "COMAR",
     "COM/AR": "COMAR",
     "COM AR": "COMAR",
@@ -370,6 +373,21 @@ def _dash_norm_txt(val):
         return ""
     return " ".join(str(val).strip().upper().split())
 
+def _dash_sin_tildes(txt):
+    return "".join(
+        c for c in unicodedata.normalize("NFD", txt)
+        if unicodedata.category(c) != "Mn"
+    )
+
+def _resolver_centro_dashboard(row):
+    for col in ("ASIGNADO_CENTRO", "DIREC_DEPEN"):
+        if col in row:
+            raw = _dash_norm_txt(row[col])
+            c = DASH_MAPA_CENTROS.get(raw, raw.replace("/", ""))
+            if c in DASH_CENTROS_OFICIALES:
+                return c
+    return ""
+
 def _normalizar_base_dashboard(df_recojo, df_agregadas):
     frames = []
     for df_src in (df_recojo, df_agregadas):
@@ -413,6 +431,36 @@ def _normalizar_base_dashboard(df_recojo, df_agregadas):
     df["OPERAT_NORM"] = df[col_op].apply(_dash_norm_txt) if col_op else ""
 
     return df[df["CENTRO_NORM"].isin(DASH_CENTROS_OFICIALES)].copy()
+
+def _normalizar_vacaciones_jubilacion(df_jpt):
+    """
+    Filtra dinámicamente desde Vac.Jubilacion_U.Prestados_U.Trasladados
+    ÚNICAMENTE el efectivo con ESTADO_STATUS correspondiente a VACACION POR JUBILACION
+    (excluyendo JUBILADO, TRASLADADOS, PRESTADO, DEFUCION y ASIGNADO).
+    """
+    if df_jpt is None or df_jpt.empty:
+        return pd.DataFrame(columns=["CENTRO_NORM", "ESTAMENTO_NORM"])
+
+    df = df_jpt.copy()
+    if "ESTADO_STATUS" not in df.columns:
+        return pd.DataFrame(columns=["CENTRO_NORM", "ESTAMENTO_NORM"])
+
+    st_limpio = df["ESTADO_STATUS"].apply(lambda x: _dash_sin_tildes(_dash_norm_txt(x)))
+    es_vac_jubilacion = st_limpio.str.contains(r"VACACION.*JUBIL", regex=True, na=False)
+
+    df_vac = df[es_vac_jubilacion].copy()
+    if df_vac.empty:
+        return pd.DataFrame(columns=["CENTRO_NORM", "ESTAMENTO_NORM"])
+
+    df_vac["CENTRO_NORM"] = df_vac.apply(_resolver_centro_dashboard, axis=1)
+    col_est = "ESTAMENTO" if "ESTAMENTO" in df_vac.columns else None
+    df_vac["ESTAMENTO_NORM"] = (
+        df_vac[col_est].apply(lambda x: DASH_MAPA_ESTAMENTOS.get(_dash_norm_txt(x), _dash_norm_txt(x)))
+        if col_est
+        else ""
+    )
+
+    return df_vac[df_vac["CENTRO_NORM"].isin(DASH_CENTROS_OFICIALES)].copy()
 
 def formulas_fila_personal(num_fila):
     """Devuelve fórmulas dinámicas de Google Sheets con TODAY() para EDAD, ANOS_SERVICIOS y TOTAL_HIJOS."""
@@ -933,7 +981,7 @@ else:
     lista_rangos = [
         "SELECCIONAR", "COMISIONADO", "SUBCOMISIONADO", "MAYOR", "CAPITÁN",
         "TENIENTE", "SUBTENIENTE", "SARGENTO 1º", "SARGENTO 2º", "CABO 1º",
-        "CABO 2º", "AGENTE", "MNJ", "MINSEG",
+        "CABO 2º", "AGENTE", "MNJ",
     ]
     lista_estamentos = ["SELECCIONAR", "P.N", "SENAFRONT", "SENAN", "MINSEG", "MNJ"]
     lista_centros = ["SELECCIONAR", "CON", "CORCOL", "COMCH", "COMDA", "COMAR", "COMSAM", "COMCHEP", "CEVIBO"]
@@ -941,7 +989,7 @@ else:
     lista_departamentos = [
         "SELECCIONAR", "DIRECCION", "SUPERVISORA ADM", "PLANEAMIENTO",
         "COOR. TECNOLOGICO", "OPERACIONES", "ESTADISTICA", "RECURSOS HUMANOS",
-        "CLL-104", "VIDEO SEGURIDAD", "DESPACHO", "LOGISTICA", "AMBER",
+        "CLL-104", "VIDEO SEGURIDAD", "DESPACHO",
     ]
     lista_turnos = ["SELECCIONAR", "4X4", "5X2", "7X7", "20X20", "24X24", "ROTATIVO", "ADMINISTRATIVO"]
     lista_turnos_parte = [
@@ -962,8 +1010,8 @@ else:
     ]
     lista_estados = [
         "SELECCIONAR", "ACTIVO", "INACTIVO", "VACACIONES",
-        "VACACIONES POR JUBILACIONES", "TRASLADADOS", "PRESTADO", "ASIGNADO",
-        "PENSIONADO", "INCAPACITADO",
+        "VACACION POR JUBILACION", "JUBILADO", "TRASLADADOS",
+        "PRESTADO", "ASIGNADO", "PENSIONADO", "INCAPACITADO",
     ]
     lista_estado_civil = ["SELECCIONAR", "SOLTERO/A", "CASADO/A", "UNIDO/A", "DIVORCIADO/A", "VIUDO/A"]
     lista_si_no = ["NO", "SÍ"]
@@ -1037,12 +1085,16 @@ else:
 
         df_dash_recojo = leer_pestana_df(PESTANA_PERSONAL, COLUMNAS_OFICIALES)
         df_dash_agregadas = leer_pestana_df(PESTANA_AGREGADAS, COLUMNAS_OFICIALES)
+        df_dash_jpt = leer_pestana_df(PESTANA_JUB_PRES_TRAS, COLUMNAS_OFICIALES)
+
         df_dash_base = _normalizar_base_dashboard(df_dash_recojo, df_dash_agregadas)
+        df_dash_jub = _normalizar_vacaciones_jubilacion(df_dash_jpt)
 
         st.markdown('<div class="neon-card">', unsafe_allow_html=True)
         st.caption(
             f"Cálculo dinámico automático en vivo (`{timestamp_actual}` · Hora de Panamá) consolidando "
-            "**`Plan_de_Recojo`** + **`Unidades_Agregadas`**."
+            "**`Plan_de_Recojo`**, **`Unidades_Agregadas`** y **`Vac.Jubilacion_U.Prestados_U.Trasladados`** "
+            "(ítem exclusivo: `VACACION POR JUBILACION`)."
         )
 
         # Filtros dinámicos opcionales (inician vacíos; solo filtran si el usuario elige)
@@ -1072,7 +1124,12 @@ else:
             & df_dash_base["ESTAMENTO_NORM"].isin(estamentos_activos)
         ].copy()
 
-        # 1. Tabla: Distribución por Centros y Estamentos
+        df_jub_f = df_dash_jub[
+            df_dash_jub["CENTRO_NORM"].isin(centros_activos)
+            & df_dash_jub["ESTAMENTO_NORM"].isin(estamentos_activos)
+        ].copy()
+
+        # 1. Tabla Izquierda: Distribución por Centros y Estamentos (sin cambios)
         rows_dist = []
         for centro in centros_activos:
             sub_c = df_dash_f[df_dash_f["CENTRO_NORM"] == centro]
@@ -1088,59 +1145,97 @@ else:
         rows_dist.append(tot_vert_dist)
         df_dist = pd.DataFrame(rows_dist)
 
-        # 2. Tabla: Parte de Operatividad
-        operativo_cnt = int((df_dash_f["OPERAT_NORM"] == "OPERATIVO").sum())
-        no_operativo_cnt = int(
-            ((df_dash_f["OPERAT_NORM"] == "NO OPERATIVO") & (df_dash_f["ESTAMENTO_NORM"] != "MNJ")).sum()
-        )
-        ordenes_acomp_cnt = int(df_dash_f["OPERAT_NORM"].str.contains("A.COMP", na=False).sum())
-        ordenes_drp_cnt = int(df_dash_f["OPERAT_NORM"].str.contains("DRP", na=False).sum())
-        mnj_cnt = int((df_dash_f["ESTAMENTO_NORM"] == "MNJ").sum())
+        # 2. Tabla Derecha: Parte de Operatividad desglosado por Centro y Total
+        rows_op = []
+        for centro in centros_activos:
+            sub_c = df_dash_f[df_dash_f["CENTRO_NORM"] == centro]
+            op_cnt = int(((sub_c["OPERAT_NORM"] == "OPERATIVO") & (sub_c["ESTAMENTO_NORM"] != "MNJ")).sum())
+            noop_cnt = int(((sub_c["OPERAT_NORM"] == "NO OPERATIVO") & (sub_c["ESTAMENTO_NORM"] != "MNJ")).sum())
+            acomp_cnt = int((sub_c["OPERAT_NORM"].str.contains("A.COMP", na=False) & (sub_c["ESTAMENTO_NORM"] != "MNJ")).sum())
+            drp_cnt = int((sub_c["OPERAT_NORM"].str.contains("DRP", na=False) & (sub_c["ESTAMENTO_NORM"] != "MNJ")).sum())
+            mnj_cnt = int((sub_c["ESTAMENTO_NORM"] == "MNJ").sum())
+            total_centro_real = len(sub_c)
+            sin_est_cnt = max(0, total_centro_real - (op_cnt + noop_cnt + acomp_cnt + drp_cnt + mnj_cnt))
 
-        df_op = pd.DataFrame([
-            {"ESTATUS OPERATIVO": "OPERATIVO", "CANTIDAD": operativo_cnt},
-            {"ESTATUS OPERATIVO": "NO OPERATIVO", "CANTIDAD": no_operativo_cnt},
-            {"ESTATUS OPERATIVO": "ORDENES A.COMP", "CANTIDAD": ordenes_acomp_cnt},
-            {"ESTATUS OPERATIVO": "ORDENES DRP", "CANTIDAD": ordenes_drp_cnt},
-            {"ESTATUS OPERATIVO": "MNJ", "CANTIDAD": mnj_cnt},
-            {
-                "ESTATUS OPERATIVO": "TOTAL",
-                "CANTIDAD": operativo_cnt + no_operativo_cnt + ordenes_acomp_cnt + ordenes_drp_cnt + mnj_cnt,
-            },
-        ])
+            rows_op.append({
+                "CENTRO": centro,
+                "OPERATIVO": op_cnt,
+                "NO OPERATIVO": noop_cnt,
+                "ORDENES A.COMP": acomp_cnt,
+                "ORDENES DRP": drp_cnt,
+                "MNJ": mnj_cnt,
+                "SIN ESTATUS": sin_est_cnt,
+                "TOTAL": op_cnt + noop_cnt + acomp_cnt + drp_cnt + mnj_cnt + sin_est_cnt,
+            })
+
+        cols_op_num = ["OPERATIVO", "NO OPERATIVO", "ORDENES A.COMP", "ORDENES DRP", "MNJ", "SIN ESTATUS", "TOTAL"]
+        tot_vert_op = {"CENTRO": "TOTAL VERTICAL"}
+        for col_name in cols_op_num:
+            tot_vert_op[col_name] = sum(r[col_name] for r in rows_op)
+        rows_op.append(tot_vert_op)
+        df_op = pd.DataFrame(rows_op)
+
+        # 3. Cuadro Intermedio: Vacaciones por Jubilación (solo ítem VACACION POR JUBILACION)
+        instituciones_jub = [e for e in DASH_ESTAMENTOS_JUBILACION if e in estamentos_activos]
+        rows_jub = []
+        for inst in instituciones_jub:
+            sub_i = df_jub_f[df_jub_f["ESTAMENTO_NORM"] == inst]
+            fila_j = {"INSTITUCIÓN / ESTAMENTO": inst}
+            for centro in centros_activos:
+                fila_j[centro] = int((sub_i["CENTRO_NORM"] == centro).sum())
+            fila_j["TOTAL HORIZONTAL"] = sum(fila_j[c] for c in centros_activos)
+            rows_jub.append(fila_j)
+
+        tot_vert_jub = {"INSTITUCIÓN / ESTAMENTO": "TOTAL"}
+        for col_name in centros_activos + ["TOTAL HORIZONTAL"]:
+            tot_vert_jub[col_name] = sum(r[col_name] for r in rows_jub)
+        rows_jub.append(tot_vert_jub)
+        df_jub_tabla = pd.DataFrame(rows_jub)
 
         # Tarjetas KPI Ejecutivas
         total_activo = int(tot_vert_dist["TOTAL HORIZONTAL"])
-        no_op_ordenes = no_operativo_cnt + ordenes_acomp_cnt + ordenes_drp_cnt
+        operativo_total = int(tot_vert_op["OPERATIVO"])
+        no_op_ordenes = int(tot_vert_op["NO OPERATIVO"] + tot_vert_op["ORDENES A.COMP"] + tot_vert_op["ORDENES DRP"])
         uniformados = sum(
             tot_vert_dist.get(e, 0) for e in ("PNP", "SENAN", "SENAFRONT") if e in tot_vert_dist
         )
         personal_civil = sum(
             tot_vert_dist.get(e, 0) for e in ("MINSEG", "MNJ") if e in tot_vert_dist
         )
+        total_vac_jubilacion = int(tot_vert_jub["TOTAL HORIZONTAL"])
 
-        dk1, dk2, dk3, dk4, dk5 = st.columns(5)
+        dk1, dk2, dk3, dk4, dk5, dk6 = st.columns(6)
         dk1.metric("Total Efectivo Activo", f"{total_activo:,}")
-        dk2.metric("Personal Operativo", f"{operativo_cnt:,}")
+        dk2.metric("Personal Operativo", f"{operativo_total:,}")
         dk3.metric("No Operativo / Órdenes", f"{no_op_ordenes:,}")
         dk4.metric("Uniformados", f"{uniformados:,}")
         dk5.metric("Personal Civil", f"{personal_civil:,}")
+        dk6.metric("Vac. por Jubilación", f"{total_vac_jubilacion:,}")
 
         st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
 
-        # Fila superior: Distribución por Centros y Estamentos + Parte de Operatividad
-        col_d_izq, col_d_der = st.columns([1.65, 1])
+        # Fila superior: Distribución por Centros y Estamentos + Parte de Operatividad por Centro
+        col_d_izq, col_d_der = st.columns([1.15, 1.35])
         with col_d_izq:
             st.markdown("<h3 style='color: #00ffff;'>🏢 Distribución por Centros y Estamentos</h3>", unsafe_allow_html=True)
             st.dataframe(df_dist, use_container_width=True, hide_index=True)
 
         with col_d_der:
-            st.markdown("<h3 style='color: #00ffff;'>⚡ Parte de Operatividad</h3>", unsafe_allow_html=True)
+            st.markdown("<h3 style='color: #00ffff;'>⚡ Parte de Operatividad por Centro</h3>", unsafe_allow_html=True)
             st.dataframe(df_op, use_container_width=True, hide_index=True)
 
         st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
 
-        # 3. Matriz: Total de Unidades por Rango y Centros
+        # Cuadro justo debajo de los dos cuadros superiores: Vacaciones por Jubilación
+        st.markdown(
+            "<h3 style='color: #00ffff;'>🏖️ Vacaciones por Jubilación (Solo Ítem: VACACION POR JUBILACION)</h3>",
+            unsafe_allow_html=True,
+        )
+        st.dataframe(df_jub_tabla, use_container_width=True, hide_index=True)
+
+        st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
+
+        # Matriz Inferior: Total de Unidades por Rango y Centros
         st.markdown("<h3 style='color: #00ffff;'>🎖️ Total de Unidades por Rango y Centros</h3>", unsafe_allow_html=True)
         rows_rango = []
         for rango in DASH_RANGOS_OFICIALES:
@@ -1161,7 +1256,7 @@ else:
 
         st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
 
-        # 4. Gráfico interactivo directo en Streamlit
+        # Gráfico interactivo directo en Streamlit
         st.markdown("<h3 style='color: #00ffff;'>📊 Efectivo por Centro y Estamento</h3>", unsafe_allow_html=True)
         df_chart = df_dist[df_dist["ESTAMENTO / CENTRO"] != "TOTAL VERTICAL"].set_index(
             "ESTAMENTO / CENTRO"
@@ -1448,7 +1543,7 @@ else:
                 )
 
                 if pestana_destino_sel == PESTANA_JUB_PRES_TRAS:
-                    estados_sugeridos = ["TRASLADADOS", "PRESTADO", "VACACIONES POR JUBILACIONES", "ASIGNADO", "DEFUCION", "DESPEDIDO"]
+                    estados_sugeridos = ["VACACION POR JUBILACION", "JUBILADO", "TRASLADADOS", "PRESTADO", "ASIGNADO"]
                 else:
                     estados_sugeridos = ["ACTIVO", "ASIGNADO", "TRASLADADOS", "PRESTADO", "VACACIONES"]
 
