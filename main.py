@@ -1255,15 +1255,6 @@ else:
 
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # Gráfico interactivo directo en Streamlit
-        st.markdown("<h3 style='color: #00ffff;'>📊 Efectivo por Centro y Estamento</h3>", unsafe_allow_html=True)
-        df_chart = df_dist[df_dist["ESTAMENTO / CENTRO"] != "TOTAL VERTICAL"].set_index(
-            "ESTAMENTO / CENTRO"
-        )[estamentos_activos]
-        st.bar_chart(df_chart, height=300)
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
     # ==========================================
     # MÓDULO 1: NUEVO REGISTRO INDIVIDUAL
     # ==========================================
