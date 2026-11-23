@@ -2027,53 +2027,147 @@ else:
             else:
                 fechas_disp = sorted([f for f in df_pd_hist["FECHA_PARTE"].unique() if str(f).strip() != ""], reverse=True)
                 f_c1, f_c2, f_c3 = st.columns([1, 1, 2])
-                fecha_vista = f_c1.selectbox("📅 Fecha de Consulta:", fechas_disp, key="pd_vista_fecha")
-                centro_vista = f_c2.selectbox("🏢 Filtrar Centro:", ["TODOS"] + lista_centros_8, key="pd_vista_centro")
+                fecha_vista = f_c1.selectbox("📅 Fecha de Corte (Parte):", fechas_disp, key="pd_vista_fecha")
+                centro_vista = f_c2.selectbox("🏢 Filtrar Centro (Detalle):", ["TODOS"] + lista_centros_8, key="pd_vista_centro")
                 busq_pd_vista = f_c3.text_input("🔎 Buscar unidad (Nombre, Apellido, Posic. o Cédula):", key="pd_vista_busq").strip().upper()
 
                 df_dia = df_pd_hist[df_pd_hist["FECHA_PARTE"] == fecha_vista].copy()
+                df_dia["_EST_NORM"] = df_dia["ESTAMENTO"].apply(
+                    lambda x: DASH_MAPA_ESTAMENTOS.get(_dash_norm_txt(x), _dash_norm_txt(x))
+                )
+                df_dia["_CENTRO_UP"] = df_dia["CENTRO"].apply(_dash_norm_txt)
+                df_dia["_TURNO_UP"] = df_dia["TURNO"].apply(_dash_norm_txt)
+                df_dia["_ASIST_UP"] = df_dia["ASISTENCIA_TURNO"].apply(_dash_norm_txt)
+                df_dia["_MOTIVO_UP"] = df_dia["MOTIVO_FALTA"].apply(_dash_norm_txt)
 
                 # KPIs Nacionales de la fecha seleccionada
                 tot_d = len(df_dia)
-                pres_d = int((df_dia["ASISTENCIA_TURNO"].str.upper() == "PRESENTE").sum())
-                falt_d = int((df_dia["ASISTENCIA_TURNO"].str.upper() == "FALTO").sum())
+                pres_d = int((df_dia["_ASIST_UP"] == "PRESENTE").sum())
+                falt_d = int((df_dia["_ASIST_UP"] == "FALTO").sum())
                 cob_d = (pres_d / tot_d * 100.0) if tot_d > 0 else 0.0
-                centros_rep = df_dia["CENTRO"].str.upper().nunique()
+                centros_rep = int(df_dia[df_dia["_CENTRO_UP"].isin(lista_centros_8)]["_CENTRO_UP"].nunique())
 
-                k1, k2, k3, k4, k5 = st.columns(5)
-                k1.metric("Efectivo Programado", f"{tot_d}")
-                k2.metric("Presentes", f"{pres_d}")
-                k3.metric("Faltos", f"{falt_d}")
-                k4.metric("% Cobertura", f"{cob_d:.1f}%")
-                k5.metric("Centros Reportados", f"{centros_rep} / 8")
+                k1, k2, k3, k4, k5, k6 = st.columns(6)
+                k1.metric("Fecha de Corte", f"{fecha_vista}")
+                k2.metric("Efectivo Programado", f"{tot_d}")
+                k3.metric("Presentes en Puesto", f"{pres_d}")
+                k4.metric("Faltos de Servicio", f"{falt_d}")
+                k5.metric("% Cobertura Nacional", f"{cob_d:.1f}%")
+                k6.metric("Centros Reportados", f"{centros_rep} / 8")
 
-                # Tabla resumen por los 8 centros
+                st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
+
+                # Cuadro 1 (Izquierda): Consolidado por Centro, Estamento y Cobertura
                 resumen_centros = []
                 for c_nom in lista_centros_8:
-                    sub_c = df_dia[df_dia["CENTRO"].str.upper() == c_nom]
+                    sub_c = df_dia[df_dia["_CENTRO_UP"] == c_nom]
                     ef_c = len(sub_c)
-                    pr_c = int((sub_c["ASISTENCIA_TURNO"].str.upper() == "PRESENTE").sum())
-                    fa_c = int((sub_c["ASISTENCIA_TURNO"].str.upper() == "FALTO").sum())
+                    pr_c = int((sub_c["_ASIST_UP"] == "PRESENTE").sum())
+                    fa_c = int((sub_c["_ASIST_UP"] == "FALTO").sum())
                     resumen_centros.append({
                         "CENTRO": c_nom,
-                        "P.N": int((sub_c["ESTAMENTO"].str.upper() == "P.N").sum()),
-                        "SENAFRONT": int((sub_c["ESTAMENTO"].str.upper() == "SENAFRONT").sum()),
-                        "SENAN": int((sub_c["ESTAMENTO"].str.upper() == "SENAN").sum()),
-                        "MNJ": int((sub_c["ESTAMENTO"].str.upper() == "MNJ").sum()),
-                        "MINSEG": int((sub_c["ESTAMENTO"].str.upper() == "MINSEG").sum()),
-                        "EFECTIVO": ef_c,
+                        "PNP": int((sub_c["_EST_NORM"] == "PNP").sum()),
+                        "SENAN": int((sub_c["_EST_NORM"] == "SENAN").sum()),
+                        "SENAFRONT": int((sub_c["_EST_NORM"] == "SENAFRONT").sum()),
+                        "MINSEG": int((sub_c["_EST_NORM"] == "MINSEG").sum()),
+                        "MNJ": int((sub_c["_EST_NORM"] == "MNJ").sum()),
+                        "PROGRAMADO": ef_c,
                         "PRESENTES": pr_c,
                         "FALTOS": fa_c,
                         "% COBERTURA": f"{(pr_c / ef_c * 100.0):.1f}%" if ef_c > 0 else "0.0%",
-                        "ESTADO": "REPORTADO" if ef_c > 0 else "PENDIENTE",
+                        "ESTATUS REPORTE": "REPORTADO" if ef_c > 0 else "PENDIENTE",
                     })
-                st.markdown("**Resumen Nacional por Centro y Estamento:**")
-                st.dataframe(pd.DataFrame(resumen_centros), use_container_width=True, hide_index=True)
 
-                # Filtrar detalle nominal
+                resumen_centros.append({
+                    "CENTRO": "TOTAL NACIONAL",
+                    "PNP": sum(r["PNP"] for r in resumen_centros),
+                    "SENAN": sum(r["SENAN"] for r in resumen_centros),
+                    "SENAFRONT": sum(r["SENAFRONT"] for r in resumen_centros),
+                    "MINSEG": sum(r["MINSEG"] for r in resumen_centros),
+                    "MNJ": sum(r["MNJ"] for r in resumen_centros),
+                    "PROGRAMADO": tot_d,
+                    "PRESENTES": pres_d,
+                    "FALTOS": falt_d,
+                    "% COBERTURA": f"{cob_d:.1f}%",
+                    "ESTATUS REPORTE": f"{centros_rep} / 8",
+                })
+
+                # Cuadro 2 (Derecha): Desglose de Faltos por Motivo
+                df_faltos_dia = df_dia[df_dia["_ASIST_UP"] == "FALTO"]
+                motivos_eval = [m for m in lista_motivos_falta if m != "N/A"]
+                rows_motivos = []
+                for mot in motivos_eval:
+                    cnt_m = int((df_faltos_dia["_MOTIVO_UP"] == mot).sum())
+                    pct_m = (cnt_m / falt_d * 100.0) if falt_d > 0 else 0.0
+                    rows_motivos.append({
+                        "MOTIVO DE AUSENCIA": mot,
+                        "CANTIDAD": cnt_m,
+                        "% FALTOS": f"{pct_m:.1f}%",
+                    })
+                tot_mot_cnt = sum(r["CANTIDAD"] for r in rows_motivos)
+                rows_motivos.append({
+                    "MOTIVO DE AUSENCIA": "TOTAL FALTOS",
+                    "CANTIDAD": tot_mot_cnt,
+                    "% FALTOS": "100.0%" if tot_mot_cnt > 0 else "0.0%",
+                })
+
+                col_pd_izq, col_pd_der = st.columns([1.85, 1])
+                with col_pd_izq:
+                    st.markdown(
+                        "<h3 style='color: #00ffff;'>📋 1. Consolidado del Parte Diario por Centro, Estamento y Cobertura</h3>",
+                        unsafe_allow_html=True,
+                    )
+                    st.dataframe(pd.DataFrame(resumen_centros), use_container_width=True, hide_index=True)
+
+                with col_pd_der:
+                    st.markdown(
+                        "<h3 style='color: #00ffff;'>🚨 2. Desglose de Faltos por Motivo</h3>",
+                        unsafe_allow_html=True,
+                    )
+                    st.dataframe(pd.DataFrame(rows_motivos), use_container_width=True, hide_index=True)
+
+                st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
+
+                # Cuadro 3: Distribución de Efectivo Programado por Turno de Servicio y Centro
+                rows_turnos = []
+                for t_nom in lista_turnos_parte:
+                    sub_t = df_dia[df_dia["_TURNO_UP"] == t_nom]
+                    fila_t = {"TURNO DE SERVICIO": t_nom}
+                    for c_nom in lista_centros_8:
+                        fila_t[c_nom] = int((sub_t["_CENTRO_UP"] == c_nom).sum())
+                    prog_t = len(sub_t)
+                    pres_t = int((sub_t["_ASIST_UP"] == "PRESENTE").sum())
+                    falt_t = int((sub_t["_ASIST_UP"] == "FALTO").sum())
+                    fila_t["PROGRAMADO"] = prog_t
+                    fila_t["PRESENTES"] = pres_t
+                    fila_t["FALTOS"] = falt_t
+                    fila_t["% COBERTURA"] = f"{(pres_t / prog_t * 100.0):.1f}%" if prog_t > 0 else "0.0%"
+                    rows_turnos.append(fila_t)
+
+                tot_turno = {"TURNO DE SERVICIO": "TOTAL GENERAL"}
+                for c_nom in lista_centros_8:
+                    tot_turno[c_nom] = sum(r[c_nom] for r in rows_turnos)
+                prog_t_tot = sum(r["PROGRAMADO"] for r in rows_turnos)
+                pres_t_tot = sum(r["PRESENTES"] for r in rows_turnos)
+                falt_t_tot = sum(r["FALTOS"] for r in rows_turnos)
+                tot_turno["PROGRAMADO"] = prog_t_tot
+                tot_turno["PRESENTES"] = pres_t_tot
+                tot_turno["FALTOS"] = falt_t_tot
+                tot_turno["% COBERTURA"] = f"{(pres_t_tot / prog_t_tot * 100.0):.1f}%" if prog_t_tot > 0 else "0.0%"
+                rows_turnos.append(tot_turno)
+
+                st.markdown(
+                    "<h3 style='color: #00ffff;'>🕒 3. Distribución de Efectivo Programado por Turno de Servicio y Centro</h3>",
+                    unsafe_allow_html=True,
+                )
+                st.dataframe(pd.DataFrame(rows_turnos), use_container_width=True, hide_index=True)
+
+                st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
+
+                # Filtrar detalle nominal (se mantiene igual que antes)
                 df_det = df_dia.copy()
                 if centro_vista != "TODOS":
-                    df_det = df_det[df_det["CENTRO"].str.upper() == centro_vista]
+                    df_det = df_det[df_det["_CENTRO_UP"] == centro_vista]
                 if busq_pd_vista:
                     mask_pd = (
                         df_det["NOMBRE"].str.upper().str.contains(busq_pd_vista, na=False)
