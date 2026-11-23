@@ -944,7 +944,7 @@ def pantalla_login():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         usuarios_permitidos = {
-            "ADMINISTRADOR": "CONC505",
+            "FERNANDO GONZALEZ": "21895",
             "LORENZO BOWEN": "10924",
             "MIRNA RIVERA": "20146",
             "ALISJHON": "199432",
