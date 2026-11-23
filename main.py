@@ -1129,33 +1129,34 @@ else:
             & df_dash_jub["ESTAMENTO_NORM"].isin(estamentos_activos)
         ].copy()
 
-        # 1. Tabla Izquierda: Distribución por Centros y Estamentos (sin cambios)
+        # 1. Tabla Izquierda: Distribución por Centros y Estamentos (columna renombrada a TOTAL)
         rows_dist = []
         for centro in centros_activos:
             sub_c = df_dash_f[df_dash_f["CENTRO_NORM"] == centro]
             fila = {"ESTAMENTO / CENTRO": centro}
             for est in estamentos_activos:
                 fila[est] = int((sub_c["ESTAMENTO_NORM"] == est).sum())
-            fila["TOTAL HORIZONTAL"] = sum(fila[e] for e in estamentos_activos)
+            fila["TOTAL"] = sum(fila[e] for e in estamentos_activos)
             rows_dist.append(fila)
 
         tot_vert_dist = {"ESTAMENTO / CENTRO": "TOTAL VERTICAL"}
-        for col_name in estamentos_activos + ["TOTAL HORIZONTAL"]:
+        for col_name in estamentos_activos + ["TOTAL"]:
             tot_vert_dist[col_name] = sum(r[col_name] for r in rows_dist)
         rows_dist.append(tot_vert_dist)
         df_dist = pd.DataFrame(rows_dist)
 
-        # 2. Tabla Derecha: Parte de Operatividad desglosado por Centro y Total
+        # 2. Tabla Derecha: Parte de Operatividad por Centro (MINSEG y MNJ sumados juntos)
         rows_op = []
         for centro in centros_activos:
             sub_c = df_dash_f[df_dash_f["CENTRO_NORM"] == centro]
-            op_cnt = int(((sub_c["OPERAT_NORM"] == "OPERATIVO") & (sub_c["ESTAMENTO_NORM"] != "MNJ")).sum())
-            noop_cnt = int(((sub_c["OPERAT_NORM"] == "NO OPERATIVO") & (sub_c["ESTAMENTO_NORM"] != "MNJ")).sum())
-            acomp_cnt = int((sub_c["OPERAT_NORM"].str.contains("A.COMP", na=False) & (sub_c["ESTAMENTO_NORM"] != "MNJ")).sum())
-            drp_cnt = int((sub_c["OPERAT_NORM"].str.contains("DRP", na=False) & (sub_c["ESTAMENTO_NORM"] != "MNJ")).sum())
-            mnj_cnt = int((sub_c["ESTAMENTO_NORM"] == "MNJ").sum())
+            es_civil = sub_c["ESTAMENTO_NORM"].isin(["MNJ", "MINSEG"])
+            op_cnt = int(((sub_c["OPERAT_NORM"] == "OPERATIVO") & (~es_civil)).sum())
+            noop_cnt = int(((sub_c["OPERAT_NORM"] == "NO OPERATIVO") & (~es_civil)).sum())
+            acomp_cnt = int((sub_c["OPERAT_NORM"].str.contains("A.COMP", na=False) & (~es_civil)).sum())
+            drp_cnt = int((sub_c["OPERAT_NORM"].str.contains("DRP", na=False) & (~es_civil)).sum())
+            minseg_mnj_cnt = int(es_civil.sum())
             total_centro_real = len(sub_c)
-            sin_est_cnt = max(0, total_centro_real - (op_cnt + noop_cnt + acomp_cnt + drp_cnt + mnj_cnt))
+            sin_est_cnt = max(0, total_centro_real - (op_cnt + noop_cnt + acomp_cnt + drp_cnt + minseg_mnj_cnt))
 
             rows_op.append({
                 "CENTRO": centro,
@@ -1163,12 +1164,12 @@ else:
                 "NO OPERATIVO": noop_cnt,
                 "ORDENES A.COMP": acomp_cnt,
                 "ORDENES DRP": drp_cnt,
-                "MNJ": mnj_cnt,
+                "MINSEG / MNJ": minseg_mnj_cnt,
                 "SIN ESTATUS": sin_est_cnt,
-                "TOTAL": op_cnt + noop_cnt + acomp_cnt + drp_cnt + mnj_cnt + sin_est_cnt,
+                "TOTAL": op_cnt + noop_cnt + acomp_cnt + drp_cnt + minseg_mnj_cnt + sin_est_cnt,
             })
 
-        cols_op_num = ["OPERATIVO", "NO OPERATIVO", "ORDENES A.COMP", "ORDENES DRP", "MNJ", "SIN ESTATUS", "TOTAL"]
+        cols_op_num = ["OPERATIVO", "NO OPERATIVO", "ORDENES A.COMP", "ORDENES DRP", "MINSEG / MNJ", "SIN ESTATUS", "TOTAL"]
         tot_vert_op = {"CENTRO": "TOTAL VERTICAL"}
         for col_name in cols_op_num:
             tot_vert_op[col_name] = sum(r[col_name] for r in rows_op)
@@ -1183,26 +1184,24 @@ else:
             fila_j = {"INSTITUCIÓN / ESTAMENTO": inst}
             for centro in centros_activos:
                 fila_j[centro] = int((sub_i["CENTRO_NORM"] == centro).sum())
-            fila_j["TOTAL HORIZONTAL"] = sum(fila_j[c] for c in centros_activos)
+            fila_j["TOTAL"] = sum(fila_j[c] for c in centros_activos)
             rows_jub.append(fila_j)
 
         tot_vert_jub = {"INSTITUCIÓN / ESTAMENTO": "TOTAL"}
-        for col_name in centros_activos + ["TOTAL HORIZONTAL"]:
+        for col_name in centros_activos + ["TOTAL"]:
             tot_vert_jub[col_name] = sum(r[col_name] for r in rows_jub)
         rows_jub.append(tot_vert_jub)
         df_jub_tabla = pd.DataFrame(rows_jub)
 
         # Tarjetas KPI Ejecutivas
-        total_activo = int(tot_vert_dist["TOTAL HORIZONTAL"])
+        total_activo = int(tot_vert_dist["TOTAL"])
         operativo_total = int(tot_vert_op["OPERATIVO"])
         no_op_ordenes = int(tot_vert_op["NO OPERATIVO"] + tot_vert_op["ORDENES A.COMP"] + tot_vert_op["ORDENES DRP"])
         uniformados = sum(
             tot_vert_dist.get(e, 0) for e in ("PNP", "SENAN", "SENAFRONT") if e in tot_vert_dist
         )
-        personal_civil = sum(
-            tot_vert_dist.get(e, 0) for e in ("MINSEG", "MNJ") if e in tot_vert_dist
-        )
-        total_vac_jubilacion = int(tot_vert_jub["TOTAL HORIZONTAL"])
+        personal_civil = int(tot_vert_op["MINSEG / MNJ"])
+        total_vac_jubilacion = int(tot_vert_jub["TOTAL"])
 
         dk1, dk2, dk3, dk4, dk5, dk6 = st.columns(6)
         dk1.metric("Total Efectivo Activo", f"{total_activo:,}")
@@ -1243,18 +1242,18 @@ else:
             fila_r = {"RANGO / CENTRO": rango}
             for centro in centros_activos:
                 fila_r[centro] = int((sub_r["CENTRO_NORM"] == centro).sum())
-            fila_r["TOTAL HORIZONTAL"] = sum(fila_r[c] for c in centros_activos)
+            fila_r["TOTAL"] = sum(fila_r[c] for c in centros_activos)
             rows_rango.append(fila_r)
 
         tot_vert_rango = {"RANGO / CENTRO": "TOTAL VERTICAL"}
-        for col_name in centros_activos + ["TOTAL HORIZONTAL"]:
+        for col_name in centros_activos + ["TOTAL"]:
             tot_vert_rango[col_name] = sum(r[col_name] for r in rows_rango)
         rows_rango.append(tot_vert_rango)
         df_rango = pd.DataFrame(rows_rango)
 
         st.dataframe(df_rango, use_container_width=True, hide_index=True)
 
-        st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
         # Gráfico interactivo directo en Streamlit
         st.markdown("<h3 style='color: #00ffff;'>📊 Efectivo por Centro y Estamento</h3>", unsafe_allow_html=True)
