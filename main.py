@@ -90,21 +90,39 @@ st.markdown(
         text-shadow: 0 0 8px rgba(0, 212, 255, 0.8);
     }}
 
-    /* Estilo para Tablas */
-    table {{
+    /* Estilo para Tablas (sin afectar el tooltip flotante de los gráficos) */
+    .stMarkdown table {{
         width: 100%;
         color: white !important;
         background-color: rgba(10, 15, 25, 0.7);
         border-collapse: collapse;
     }}
-    th, td {{
+    .stMarkdown th, .stMarkdown td {{
         border: 1px solid #00d4ff !important;
         padding: 8px;
         text-align: center;
     }}
-    th {{
+    .stMarkdown th {{
         background-color: rgba(0, 212, 255, 0.2);
         color: #00d4ff !important;
+    }}
+
+    /* Mantener el tooltip de los gráficos compacto y oculto cuando no está activo */
+    #vg-tooltip-element {{
+        background-color: rgba(10, 15, 25, 0.95) !important;
+        border: 1px solid #00d4ff !important;
+        color: #ffffff !important;
+        width: auto !important;
+    }}
+    #vg-tooltip-element table {{
+        width: auto !important;
+        border: none !important;
+        background: transparent !important;
+    }}
+    #vg-tooltip-element td {{
+        border: none !important;
+        padding: 2px 6px !important;
+        text-align: left !important;
     }}
 
     /* Efecto Neón en Textos y Títulos */
