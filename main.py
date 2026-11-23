@@ -1448,7 +1448,7 @@ else:
                 )
 
                 if pestana_destino_sel == PESTANA_JUB_PRES_TRAS:
-                    estados_sugeridos = ["TRASLADADOS", "PRESTADO", "VACACIONES POR JUBILACIONES", "ASIGNADO"]
+                    estados_sugeridos = ["TRASLADADOS", "PRESTADO", "VACACIONES POR JUBILACIONES", "ASIGNADO", "DEFUCION", "DESPEDIDO"]
                 else:
                     estados_sugeridos = ["ACTIVO", "ASIGNADO", "TRASLADADOS", "PRESTADO", "VACACIONES"]
 
