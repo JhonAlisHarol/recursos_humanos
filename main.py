@@ -1155,8 +1155,6 @@ else:
             acomp_cnt = int((sub_c["OPERAT_NORM"].str.contains("A.COMP", na=False) & (~es_civil)).sum())
             drp_cnt = int((sub_c["OPERAT_NORM"].str.contains("DRP", na=False) & (~es_civil)).sum())
             minseg_mnj_cnt = int(es_civil.sum())
-            total_centro_real = len(sub_c)
-            sin_est_cnt = max(0, total_centro_real - (op_cnt + noop_cnt + acomp_cnt + drp_cnt + minseg_mnj_cnt))
 
             rows_op.append({
                 "CENTRO": centro,
@@ -1165,11 +1163,10 @@ else:
                 "ORDENES A.COMP": acomp_cnt,
                 "ORDENES DRP": drp_cnt,
                 "MINSEG / MNJ": minseg_mnj_cnt,
-                "SIN ESTATUS": sin_est_cnt,
-                "TOTAL": op_cnt + noop_cnt + acomp_cnt + drp_cnt + minseg_mnj_cnt + sin_est_cnt,
+                "TOTAL": op_cnt + noop_cnt + acomp_cnt + drp_cnt + minseg_mnj_cnt,
             })
 
-        cols_op_num = ["OPERATIVO", "NO OPERATIVO", "ORDENES A.COMP", "ORDENES DRP", "MINSEG / MNJ", "SIN ESTATUS", "TOTAL"]
+        cols_op_num = ["OPERATIVO", "NO OPERATIVO", "ORDENES A.COMP", "ORDENES DRP", "MINSEG / MNJ", "TOTAL"]
         tot_vert_op = {"CENTRO": "TOTAL VERTICAL"}
         for col_name in cols_op_num:
             tot_vert_op[col_name] = sum(r[col_name] for r in rows_op)
