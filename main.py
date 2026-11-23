@@ -1045,20 +1045,22 @@ else:
             "**`Plan_de_Recojo`** + **`Unidades_Agregadas`**."
         )
 
-        # Filtros dinámicos opcionales
+        # Filtros dinámicos opcionales (inician vacíos; solo filtran si el usuario elige)
         cf1, cf2 = st.columns(2)
         with cf1:
             centros_sel_dash = st.multiselect(
                 "🏢 Filtrar por Centro:",
                 options=DASH_CENTROS_OFICIALES,
-                default=DASH_CENTROS_OFICIALES,
+                default=[],
+                placeholder="Todos los centros (clic para elegir)...",
                 key="dash_exec_centros",
             )
         with cf2:
             estamentos_sel_dash = st.multiselect(
                 "🛡️ Filtrar por Estamento:",
                 options=DASH_ESTAMENTOS_OFICIALES,
-                default=DASH_ESTAMENTOS_OFICIALES,
+                default=[],
+                placeholder="Todos los estamentos (clic para elegir)...",
                 key="dash_exec_estamentos",
             )
 
