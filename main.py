@@ -941,7 +941,7 @@ else:
     lista_departamentos = [
         "SELECCIONAR", "DIRECCION", "SUPERVISORA ADM", "PLANEAMIENTO",
         "COOR. TECNOLOGICO", "OPERACIONES", "ESTADISTICA", "RECURSOS HUMANOS",
-        "CLL-104", "VIDEO SEGURIDAD", "DESPACHO", "LOGISTICA",
+        "CLL-104", "VIDEO SEGURIDAD", "DESPACHO", "LOGISTICA", "AMBER",
     ]
     lista_turnos = ["SELECCIONAR", "4X4", "5X2", "7X7", "20X20", "24X24", "ROTATIVO", "ADMINISTRATIVO"]
     lista_turnos_parte = [
