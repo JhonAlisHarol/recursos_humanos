@@ -181,6 +181,7 @@ PESTANA_JUB_PRES_TRAS = "Vac.Jubilacion_U.Prestados_U.Trasladados"
 PESTANA_NOVEDADES = "Permiso,incapacidad,licencia"
 PESTANA_PARTE_DIARIO = "Parte_Diario_Personal"
 PESTANA_CHAT = "Chat_Institucional"
+PESTANA_SANCIONES = "Sanciones_y_Expediente"
 
 PESTANAS_UNIDADES = [
     PESTANA_PERSONAL,
@@ -231,6 +232,16 @@ COLUMNAS_PARTE_DIARIO = [
 ]
 
 COLUMNAS_CHAT = ["TIMESTAMP", "USUARIO", "PRIORIDAD", "MENSAJE"]
+
+COLUMNAS_SANCIONES = [
+    "ID_EXPEDIENTE", "TIMESTAMP", "USUARIO_REGISTRO",
+    "RANGO", "POSIC", "NOMBRE", "APELLIDO", "CEDULA", "ESTAMENTO",
+    "ASIGNADO_CENTRO", "DEPARTAMENTO", "TURNO", "GRUPO",
+    "CATEGORIA_DOC", "GRAVEDAD", "DIAS_SANCION_ARRESTO",
+    "FECHA_HECHO_EMISION", "FECHA_INICIO_CUMPLIMIENTO", "FECHA_FIN_CUMPLIMIENTO",
+    "NUM_RESOLUCION_EXP", "AUTORIDAD_QUE_IMPONE", "ESTADO_EXPEDIENTE",
+    "RESUMEN_MOTIVO_ARTICULO", "ENLACE_DOCUMENTO_DRIVE",
+]
 
 JERARQUIA_RANGOS = {
     "COMISIONADO": 1,
@@ -515,6 +526,8 @@ def obtener_o_crear_worksheet(nombre_pestana, columnas_hdr=None):
             columnas_hdr = COLUMNAS_PARTE_DIARIO
         elif nombre_pestana == PESTANA_CHAT:
             columnas_hdr = COLUMNAS_CHAT
+        elif nombre_pestana == PESTANA_SANCIONES:
+            columnas_hdr = COLUMNAS_SANCIONES
         else:
             columnas_hdr = COLUMNAS_OFICIALES
     cliente_gs = conectar_google_sheets()
@@ -709,6 +722,419 @@ def leer_chat_df():
         return pd.DataFrame(filas_norm, columns=COLUMNAS_CHAT)
     except Exception:
         return pd.DataFrame(columns=COLUMNAS_CHAT)
+
+def actualizar_fila_sancion(indice_df, nuevo_estado, nuevo_enlace, nota_extra, usuario_actual, timestamp_str):
+    """Actualiza estado, enlace de respaldo o nota en Sanciones_y_Expediente."""
+    ws = obtener_o_crear_worksheet(PESTANA_SANCIONES, COLUMNAS_SANCIONES)
+    todos = ws.get_all_values()
+    fila_sheet = indice_df + 2
+    if fila_sheet < 2 or fila_sheet > len(todos):
+        raise IndexError("No se encontró la fila seleccionada en Sanciones_y_Expediente.")
+
+    num_cols = len(COLUMNAS_SANCIONES)
+    fila_act = todos[fila_sheet - 1][:num_cols] + [""] * max(0, num_cols - len(todos[fila_sheet - 1]))
+    fila_act[1] = timestamp_str
+    fila_act[2] = f"{limpiar_valor(usuario_actual)} (ACT. {timestamp_str})"
+    fila_act[21] = limpiar_valor(nuevo_estado)
+    if str(nuevo_enlace).strip():
+        fila_act[23] = str(nuevo_enlace).strip()
+    if limpiar_valor(nota_extra):
+        prev_res = str(fila_act[22]).strip()
+        fila_act[22] = f"{prev_res} | {limpiar_valor(nota_extra)}" if prev_res else limpiar_valor(nota_extra)
+
+    ws.update(range_name=f"A{fila_sheet}:X{fila_sheet}", values=[fila_act], value_input_option="USER_ENTERED")
+    leer_pestana_df.clear()
+
+def subir_respaldo_expediente_drive(archivo_subido, nombre_archivo, carpeta_destino="Expedientes_CON_RRHH"):
+    """Sube un PDF o imagen a la carpeta compartida de Google Drive y devuelve su enlace webViewLink."""
+    import json as _json
+    from google.auth.transport.requests import AuthorizedSession
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds = Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]), scopes=scopes
+    )
+    sesion = AuthorizedSession(creds)
+
+    folder_id = st.secrets.get("drive_folder_expedientes", "").strip()
+    if not folder_id:
+        q = f"name='{carpeta_destino}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        resp_q = sesion.get(
+            "https://www.googleapis.com/drive/v3/files",
+            params={"q": q, "fields": "files(id,name)", "supportsAllDrives": True, "includeItemsFromAllDrives": True},
+        )
+        if resp_q.ok and resp_q.json().get("files"):
+            folder_id = resp_q.json()["files"][0]["id"]
+
+    if not folder_id:
+        raise RuntimeError(
+            f"No se encontró la carpeta compartida '{carpeta_destino}' en Drive. "
+            "Compártela con tu cuenta de servicio o pega el enlace manualmente."
+        )
+
+    meta = {"name": nombre_archivo, "parents": [folder_id]}
+    boundary = "===CON_C5_BOUNDARY==="
+    mime_arch = archivo_subido.type or "application/pdf"
+    cuerpo = (
+        f"--{boundary}\r\n"
+        f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+        f"{_json.dumps(meta)}\r\n"
+        f"--{boundary}\r\n"
+        f"Content-Type: {mime_arch}\r\n\r\n"
+    ).encode("utf-8") + archivo_subido.getvalue() + f"\r\n--{boundary}--".encode("utf-8")
+
+    resp_up = sesion.post(
+        "https://www.googleapis.com/upload/drive/v3/files",
+        params={"uploadType": "multipart", "supportsAllDrives": True, "fields": "id,webViewLink"},
+        headers={"Content-Type": f"multipart/related; boundary={boundary}"},
+        data=cuerpo,
+    )
+    if not resp_up.ok:
+        raise RuntimeError(f"Drive rechazó la subida ({resp_up.status_code}): {resp_up.text[:160]}")
+    return resp_up.json().get("webViewLink", "")
+
+SECCIONES_HOJA_MECANIZADA = [
+    ("1. IDENTIFICACIÓN PERSONAL Y DATOS DE SERVICIO", [
+        ("Rango", "RANGO"), ("Posición", "POSIC"), ("N.° Placa Metálica", "PLACA_METALICA"),
+        ("Nombre", "NOMBRE"), ("Apellido", "APELLIDO"), ("Cédula", "CEDULA"),
+        ("Fecha de Nacimiento", "FECHA_NACIMIENTO"), ("Edad", "EDAD"), ("Género", "GENERO"),
+        ("Teléfono Personal", "TELEFONO_PERSONAL"), ("Estamento", "ESTAMENTO"),
+        ("N.° Promoción", "NUM_PROMOCION"), ("Descripción Promoción", "DESCRIPCION_PROMOCION"),
+        ("Fecha de Ingreso", "FECHA_INGRESO"), ("Años de Servicio", "ANOS_SERVICIOS"),
+    ]),
+    ("2. ASIGNACIÓN OPERATIVA Y FUNCIONES GENERALES", [
+        ("Res. / OGD Asignación", "RES_OGD_ASIG"), ("Asig. / Traslado", "ASIG_TRASLADO"),
+        ("Dirección / Dependencia", "DIREC_DEPEN"), ("Centro Asignado", "ASIGNADO_CENTRO"),
+        ("Ubicación del Centro", "U_CENTRO_ASIGNADO"), ("Departamento", "DEPARTAMENTO"),
+        ("Turno", "TURNO"), ("Grupo", "GRUPO"),
+        ("Función", "FUNCION"), ("Estado / Status", "ESTADO_STATUS"),
+    ]),
+    ("3. OPERATIVIDAD, SALUD Y CONDICIÓN MÉDICA", [
+        ("Estatus Operativo", "OPERAT_NO_OPERAT"), ("Permanente / Temporal", "PERM_TEMP"),
+        ("Condición", "CONDICION"), ("Apto / No Apto", "APTO_NO_APTO"),
+        ("Nivel de Salud", "NIVEL_SALUD"), ("Cert. Buena Salud", "CERT_BUENA_SALUD"),
+        ("Fecha Diagnóstico", "FECHA_DIAGNOSTICO"), ("Próx. Evaluación", "F_PROX_EVALUACION"),
+        ("Salud Ocupacional", "SALUD_OCUPACIONAL"), ("Pensionado", "PENSIONADO"),
+        ("Observación Médica / General", "OBSERVACION"),
+    ]),
+    ("4. RESIDENCIA Y CONTACTO DE EMERGENCIA", [
+        ("Provincia", "PROVINCIA"), ("Distrito", "DISTRITO"),
+        ("Corregimiento", "CORREGIMIENTO"), ("Lugar / Dirección", "LUGAR"),
+        ("Tipo de Sangre", "TIPO_SANGRE"), ("Contacto Emergencia", "NOMBRE_EMERGENCIA"),
+        ("Parentesco", "PARENTESCO"), ("Tel. Emergencia", "TELEFONO_EMERGENCIA"),
+    ]),
+    ("5. ESTADO CIVIL, FAMILIA Y FORMACIÓN ACADÉMICA", [
+        ("Estado Civil", "ESTADO_CIVIL"), ("Donante de Sangre", "DONANTE_SANGRE"),
+        ("Secundaria", "SECUNDARIA"), ("Universidad / Técnico", "UNIVERSIDAD"),
+        ("Hijos (M)", "HIJOS_M"), ("Hijas (F)", "HIJAS_F"), ("Total Hijos", "TOTAL_HIJOS"),
+    ]),
+    ("6. TALLAS DE UNIFORME Y EQUIPAMIENTO", [
+        ("Talla Camisa", "TALLA_CAMISA"), ("Talla Pantalón", "TALLA_PANTALON"),
+        ("Talla Suéter", "TALLA_SUETER"), ("Talla Botas", "TALLA_BOTAS"),
+        ("Talla Zapatos", "TALLA_ZAPATOS"), ("Talla Quépi", "TALLA_QUEPI"),
+        ("Talla Correa", "TALLA_CORREA"),
+    ]),
+    ("7. AUDITORÍA DEL REGISTRO EN BASE DE DATOS", [
+        ("Última Actualización", "TIMESTAMP"), ("Usuario Registro / Edición", "USUARIO_REGISTRO"),
+    ]),
+]
+
+def generar_html_hoja_mecanizada(unidad_dict, origen_hoja, df_nov_u, df_san_u, usuario_emite, timestamp_str, foto_b64="", foto_mime="image/png"):
+    """Genera el documento HTML oficial (tamaño Carta) con los 60 campos, novedades, sanciones y botón de impresión/PDF."""
+    def _v(k):
+        val = str(unidad_dict.get(k, "")).strip()
+        return html.escape(val) if val else "—"
+
+    foto_html = (
+        f"<img src='data:{foto_mime};base64,{foto_b64}' style='width:95px;height:115px;object-fit:cover;border:2px solid #0f2744;border-radius:4px;'/>"
+        if foto_b64
+        else "<div style='width:95px;height:115px;border:1.5px dashed #52647a;display:flex;align-items:center;justify-content:center;font-size:10px;color:#52647a;text-align:center;border-radius:4px;'>FOTO<br>CARNET</div>"
+    )
+
+    bloques_sec = []
+    for titulo_sec, campos in SECCIONES_HOJA_MECANIZADA:
+        celdas = []
+        for i in range(0, len(campos), 3):
+            grupo = campos[i:i + 3]
+            tds = []
+            for lbl, col_k in grupo:
+                colspan = f" colspan='{4 - len(grupo)}'" if (i + 3 >= len(campos) and len(grupo) < 3 and lbl == grupo[-1][0]) else ""
+                tds.append(
+                    f"<td{colspan} style='border:1px solid #c8d4e3;padding:5px 7px;vertical-align:top;width:33.3%;'>"
+                    f"<div style='font-size:9px;font-weight:bold;color:#1c3f6e;text-transform:uppercase;'>{html.escape(lbl)}</div>"
+                    f"<div style='font-size:11px;color:#111827;margin-top:2px;word-break:break-word;'>{_v(col_k)}</div>"
+                    f"</td>"
+                )
+            celdas.append(f"<tr>{''.join(tds)}</tr>")
+        bloques_sec.append(
+            f"<div class='sec-title'>{html.escape(titulo_sec)}</div>"
+            f"<table class='grid-tbl'>{''.join(celdas)}</table>"
+        )
+
+    # Sección 8: Permisos, Incapacidades, Licencias y Vacaciones
+    if df_nov_u is not None and not df_nov_u.empty:
+        filas_n = []
+        for _, rn in df_nov_u.iterrows():
+            filas_n.append(
+                "<tr>"
+                f"<td>{html.escape(str(rn.get('ID_NOVEDAD', '')))}</td>"
+                f"<td>{html.escape(str(rn.get('TIPO_NOVEDAD', '')))}</td>"
+                f"<td>{html.escape(str(rn.get('SUBTIPO_MOTIVO', '')))}</td>"
+                f"<td>{html.escape(str(rn.get('FECHA_INICIO', '')))}</td>"
+                f"<td>{html.escape(str(rn.get('FECHA_FIN', '')))}</td>"
+                f"<td>{html.escape(str(rn.get('DIAS_TOTALES', '')))}</td>"
+                f"<td>{html.escape(str(rn.get('ESTADO_TRAMITE', '')))}</td>"
+                f"<td>{html.escape(str(rn.get('NUM_DOCUMENTO_RESPALDO', '')))}</td>"
+                "</tr>"
+            )
+        tabla_nov_html = (
+            "<table class='hist-tbl'><thead><tr>"
+            "<th>ID</th><th>Tipo</th><th>Subtipo / Motivo</th><th>Inicio</th>"
+            "<th>Fin</th><th>Días</th><th>Estado</th><th>Respaldo</th>"
+            f"</tr></thead><tbody>{''.join(filas_n)}</tbody></table>"
+        )
+    else:
+        tabla_nov_html = "<div class='empty-box'>Sin permisos, incapacidades, licencias ni vacaciones registradas en sistema.</div>"
+
+    # Sección 9: Cuadro Disciplinario, Sanciones y Expediente Documental
+    if df_san_u is not None and not df_san_u.empty:
+        filas_s = []
+        for _, rs in df_san_u.iterrows():
+            filas_s.append(
+                "<tr>"
+                f"<td>{html.escape(str(rs.get('ID_EXPEDIENTE', '')))}</td>"
+                f"<td>{html.escape(str(rs.get('CATEGORIA_DOC', '')))}</td>"
+                f"<td>{html.escape(str(rs.get('GRAVEDAD', '')))}</td>"
+                f"<td>{html.escape(str(rs.get('DIAS_SANCION_ARRESTO', '0')))}</td>"
+                f"<td>{html.escape(str(rs.get('FECHA_HECHO_EMISION', '')))}</td>"
+                f"<td>{html.escape(str(rs.get('NUM_RESOLUCION_EXP', '')))}</td>"
+                f"<td>{html.escape(str(rs.get('ESTADO_EXPEDIENTE', '')))}</td>"
+                f"<td>{html.escape(str(rs.get('RESUMEN_MOTIVO_ARTICULO', '')))}</td>"
+                "</tr>"
+            )
+        tabla_san_html = (
+            "<table class='hist-tbl'><thead><tr>"
+            "<th>ID</th><th>Categoría</th><th>Gravedad</th><th>Días</th>"
+            "<th>Fecha</th><th>Resolución / Doc.</th><th>Estado</th><th>Resumen / Artículo</th>"
+            f"</tr></thead><tbody>{''.join(filas_s)}</tbody></table>"
+        )
+    else:
+        tabla_san_html = "<div class='empty-box'>Sin sanciones, arrestos ni documentos disciplinarios registrados en sistema.</div>"
+
+    nombre_comp = f"{_v('RANGO')} {_v('NOMBRE')} {_v('APELLIDO')}"
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<title>Hoja Mecanizada - {_v('POSIC')} {_v('NOMBRE')} {_v('APELLIDO')}</title>
+<style>
+  @page {{ size: letter portrait; margin: 10mm; }}
+  * {{ box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }}
+  body {{ font-family: Arial, Helvetica, sans-serif; background: #eef2f7; margin: 0; padding: 14px; color: #111827; }}
+  .toolbar {{ max-width: 820px; margin: 0 auto 12px auto; text-align: right; }}
+  .btn-print {{ background: #0f2744; color: #ffffff; border: 2px solid #00d4ff; padding: 9px 18px; font-size: 13px; font-weight: bold; border-radius: 6px; cursor: pointer; }}
+  .btn-print:hover {{ background: #1c3f6e; }}
+  .sheet {{ max-width: 820px; margin: 0 auto; background: #ffffff; padding: 20px 24px; border: 1px solid #cbd5e1; box-shadow: 0 4px 18px rgba(0,0,0,0.12); }}
+  .hdr {{ display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #0f2744; padding-bottom: 10px; margin-bottom: 12px; gap: 14px; }}
+  .hdr-txt {{ flex: 1; }}
+  .inst {{ font-size: 11px; font-weight: bold; color: #1c3f6e; letter-spacing: 0.8px; }}
+  .title {{ font-size: 17px; font-weight: bold; color: #0f2744; margin: 3px 0; }}
+  .sub {{ font-size: 11px; color: #334155; }}
+  .badge-bar {{ background: #eef4fa; border-left: 4px solid #0f2744; padding: 7px 10px; margin-bottom: 12px; font-size: 11px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }}
+  .sec-title {{ background: #0f2744; color: #ffffff; font-size: 11px; font-weight: bold; padding: 5px 9px; margin-top: 10px; letter-spacing: 0.4px; }}
+  .grid-tbl {{ width: 100%; border-collapse: collapse; margin-bottom: 4px; }}
+  .hist-tbl {{ width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 6px; }}
+  .hist-tbl th {{ background: #1c3f6e; color: #ffffff; padding: 5px; border: 1px solid #cbd5e1; text-align: left; }}
+  .hist-tbl td {{ padding: 5px; border: 1px solid #cbd5e1; vertical-align: top; }}
+  .hist-tbl tr:nth-child(even) {{ background: #f8fafc; }}
+  .empty-box {{ border: 1px solid #cbd5e1; padding: 8px 10px; font-size: 10.5px; color: #475569; font-style: italic; background: #f8fafc; }}
+  .firmas {{ display: flex; justify-content: space-between; margin-top: 28px; gap: 18px; page-break-inside: avoid; }}
+  .firma-box {{ flex: 1; text-align: center; font-size: 10px; color: #1e293b; }}
+  .firma-line {{ border-top: 1px solid #0f2744; margin-top: 34px; padding-top: 4px; font-weight: bold; }}
+  .foot {{ margin-top: 14px; font-size: 9px; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 6px; }}
+  @media print {{
+    body {{ background: #ffffff; padding: 0; }}
+    .toolbar {{ display: none !important; }}
+    .sheet {{ box-shadow: none; border: none; max-width: 100%; padding: 0; }}
+  }}
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <button class="btn-print" onclick="window.print()">🖨️ Imprimir / Guardar en PDF</button>
+  </div>
+  <div class="sheet">
+    <div class="hdr">
+      <div class="hdr-txt">
+        <div class="inst">REPÚBLICA DE PANAMÁ · MINISTERIO DE SEGURIDAD PÚBLICA</div>
+        <div class="inst">CENTRO DE OPERACIÓN NACIONAL (CON-C5) · RECURSOS HUMANOS</div>
+        <div class="title">HOJA MECANIZADA INTEGRAL DE PERSONAL</div>
+        <div class="sub"><strong>Unidad:</strong> {nombre_comp} &nbsp;|&nbsp; <strong>Posición:</strong> {_v('POSIC')} &nbsp;|&nbsp; <strong>Cédula:</strong> {_v('CEDULA')}</div>
+      </div>
+      <div>{foto_html}</div>
+    </div>
+
+    <div class="badge-bar">
+      <span><strong>Origen BD:</strong> {html.escape(str(origen_hoja))}</span>
+      <span><strong>Estamento:</strong> {_v('ESTAMENTO')}</span>
+      <span><strong>Centro:</strong> {_v('ASIGNADO_CENTRO')}</span>
+      <span><strong>Estado:</strong> {_v('ESTADO_STATUS')}</span>
+      <span><strong>Operatividad:</strong> {_v('OPERAT_NO_OPERAT')}</span>
+    </div>
+
+    {''.join(bloques_sec)}
+
+    <div class="sec-title">8. HISTORIAL DE PERMISOS, INCAPACIDADES, LICENCIAS Y VACACIONES</div>
+    {tabla_nov_html}
+
+    <div class="sec-title">9. CUADRO DISCIPLINARIO, SANCIONES Y EXPEDIENTE DOCUMENTAL</div>
+    {tabla_san_html}
+
+    <div class="firmas">
+      <div class="firma-box"><div class="firma-line">FIRMA DE LA UNIDAD</div><div>{_v('NOMBRE')} {_v('APELLIDO')} · Céd. {_v('CEDULA')}</div></div>
+      <div class="firma-box"><div class="firma-line">RECURSOS HUMANOS · CON-C5</div><div>Emitido por: {html.escape(str(usuario_emite))}</div></div>
+      <div class="firma-box"><div class="firma-line">DIRECCIÓN / JEFATURA CON-C5</div><div>Vo. Bo. Institucional</div></div>
+    </div>
+
+    <div class="foot">Documento generado automáticamente desde el Sistema de Recursos Humanos CON-C5 · Fecha y hora de emisión (Panamá): {html.escape(str(timestamp_str))}</div>
+  </div>
+</body>
+</html>"""
+
+def generar_excel_hoja_mecanizada(unidad_dict, origen_hoja, df_nov_u, df_san_u, usuario_emite, timestamp_str):
+    """Genera la Hoja Mecanizada oficial formateada en Excel (.xlsx) lista para imprimir."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Hoja_Mecanizada"
+
+    fill_navy = PatternFill("solid", fgColor="0F2744")
+    fill_sec = PatternFill("solid", fgColor="1C3F6E")
+    fill_lbl = PatternFill("solid", fgColor="EEF4FA")
+    thin = Side(style="thin", color="C8D4E3")
+    bdr = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    ws.merge_cells("A1:F1")
+    ws["A1"] = "MINISTERIO DE SEGURIDAD PÚBLICA · CENTRO DE OPERACIÓN NACIONAL (CON-C5) — HOJA MECANIZADA DE PERSONAL"
+    ws["A1"].font = Font(name="Calibri", size=12, bold=True, color="FFFFFF")
+    ws["A1"].fill = fill_navy
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 26
+
+    ws.merge_cells("A2:F2")
+    ws["A2"] = f"Origen BD: {origen_hoja} | Emitido por: {usuario_emite} | Fecha: {timestamp_str}"
+    ws["A2"].font = Font(name="Calibri", size=9, italic=True, color="1C3F6E")
+    ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[2].height = 18
+
+    fila_r = 4
+    for titulo_sec, campos in SECCIONES_HOJA_MECANIZADA:
+        ws.merge_cells(start_row=fila_r, start_column=1, end_row=fila_r, end_column=6)
+        c_tit = ws.cell(fila_r, 1, titulo_sec)
+        c_tit.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+        c_tit.fill = fill_sec
+        c_tit.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        ws.row_dimensions[fila_r].height = 21
+        fila_r += 1
+
+        for i in range(0, len(campos), 3):
+            grupo = campos[i:i + 3]
+            ws.row_dimensions[fila_r].height = 20
+            for idx_g, (lbl, col_k) in enumerate(grupo):
+                col_l = idx_g * 2 + 1
+                col_v = col_l + 1
+                c_l = ws.cell(fila_r, col_l, lbl)
+                c_l.font = Font(name="Calibri", size=9, bold=True, color="0F2744")
+                c_l.fill = fill_lbl
+                c_l.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+                c_l.border = bdr
+
+                val_txt = str(unidad_dict.get(col_k, "")).strip() or "—"
+                c_v = ws.cell(fila_r, col_v, val_txt)
+                c_v.font = Font(name="Calibri", size=10, color="111827")
+                c_v.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+                c_v.border = bdr
+            fila_r += 1
+        fila_r += 1
+
+    # Sección 8: Novedades
+    ws.merge_cells(start_row=fila_r, start_column=1, end_row=fila_r, end_column=6)
+    ws.cell(fila_r, 1, "8. HISTORIAL DE PERMISOS, INCAPACIDADES, LICENCIAS Y VACACIONES").font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+    ws.cell(fila_r, 1).fill = fill_sec
+    fila_r += 1
+    for idx_h, h in enumerate(["ID", "TIPO", "SUBTIPO / MOTIVO", "INICIO / FIN", "DÍAS / ESTADO", "RESPALDO"], start=1):
+        ch = ws.cell(fila_r, idx_h, h)
+        ch.font = Font(name="Calibri", size=9, bold=True, color="0F2744")
+        ch.fill = fill_lbl
+        ch.border = bdr
+    fila_r += 1
+    if df_nov_u is not None and not df_nov_u.empty:
+        for _, rn in df_nov_u.iterrows():
+            vals_n = [
+                str(rn.get("ID_NOVEDAD", "")),
+                str(rn.get("TIPO_NOVEDAD", "")),
+                str(rn.get("SUBTIPO_MOTIVO", "")),
+                f"{rn.get('FECHA_INICIO', '')} a {rn.get('FECHA_FIN', '')}",
+                f"{rn.get('DIAS_TOTALES', '')} día(s) · {rn.get('ESTADO_TRAMITE', '')}",
+                str(rn.get("NUM_DOCUMENTO_RESPALDO", "")),
+            ]
+            for ci, v in enumerate(vals_n, start=1):
+                c = ws.cell(fila_r, ci, v)
+                c.font = Font(name="Calibri", size=9)
+                c.border = bdr
+            fila_r += 1
+    else:
+        ws.merge_cells(start_row=fila_r, start_column=1, end_row=fila_r, end_column=6)
+        ws.cell(fila_r, 1, "Sin registros en Permiso,incapacidad,licencia.").font = Font(name="Calibri", size=9, italic=True)
+        fila_r += 1
+
+    fila_r += 1
+    # Sección 9: Sanciones y Expediente
+    ws.merge_cells(start_row=fila_r, start_column=1, end_row=fila_r, end_column=6)
+    ws.cell(fila_r, 1, "9. CUADRO DISCIPLINARIO, SANCIONES Y EXPEDIENTE DOCUMENTAL").font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+    ws.cell(fila_r, 1).fill = fill_sec
+    fila_r += 1
+    for idx_h, h in enumerate(["ID", "CATEGORÍA", "GRAVEDAD / DÍAS", "FECHA", "RESOLUCIÓN / ESTADO", "RESUMEN / ARTÍCULO"], start=1):
+        ch = ws.cell(fila_r, idx_h, h)
+        ch.font = Font(name="Calibri", size=9, bold=True, color="0F2744")
+        ch.fill = fill_lbl
+        ch.border = bdr
+    fila_r += 1
+    if df_san_u is not None and not df_san_u.empty:
+        for _, rs in df_san_u.iterrows():
+            vals_s = [
+                str(rs.get("ID_EXPEDIENTE", "")),
+                str(rs.get("CATEGORIA_DOC", "")),
+                f"{rs.get('GRAVEDAD', '')} · {rs.get('DIAS_SANCION_ARRESTO', '0')} día(s)",
+                str(rs.get("FECHA_HECHO_EMISION", "")),
+                f"{rs.get('NUM_RESOLUCION_EXP', '')} ({rs.get('ESTADO_EXPEDIENTE', '')})",
+                str(rs.get("RESUMEN_MOTIVO_ARTICULO", "")),
+            ]
+            for ci, v in enumerate(vals_s, start=1):
+                c = ws.cell(fila_r, ci, v)
+                c.font = Font(name="Calibri", size=9)
+                c.border = bdr
+            fila_r += 1
+    else:
+        ws.merge_cells(start_row=fila_r, start_column=1, end_row=fila_r, end_column=6)
+        ws.cell(fila_r, 1, "Sin registros en Sanciones_y_Expediente.").font = Font(name="Calibri", size=9, italic=True)
+
+    for col_l, w in [("A", 19), ("B", 22), ("C", 19), ("D", 22), ("E", 19), ("F", 24)]:
+        ws.column_dimensions[col_l].width = w
+    ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
+    ws.page_setup.paperSize = ws.PAPERSIZE_LETTER
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 def enviar_mensaje_chat(usuario, prioridad, mensaje, timestamp_str):
     """Guarda un mensaje nuevo en Chat_Institucional visible para todos los usuarios logueados."""
@@ -1106,6 +1532,8 @@ else:
                 "🩺 Permisos, Incapacidades, Licencias y Vacaciones",
                 "📋 Parte Diario de Personal",
                 "📊 Consulta de Bases de Datos",
+                "⚖️ Sanciones y Expediente",
+                "🪪 Hoja Mecanizada",
                 "💬 Chat Institucional",
             ],
             index=0,
@@ -2468,7 +2896,7 @@ else:
                                 st.error(f"❌ Error al actualizar: {e_aj}")
 
             st.markdown("</div>", unsafe_allow_html=True)
-
+    
     # ==========================================
     # MÓDULO 5: CONSULTA Y EDICIÓN DE BASES DE DATOS
     # ==========================================
@@ -2485,9 +2913,10 @@ else:
                 leer_pestana_df.clear()
                 st.rerun()
 
-        tab_bd_personal, tab_bd_novedades = st.tabs([
+        tab_bd_personal, tab_bd_novedades, tab_bd_sanciones = st.tabs([
             "🗂️ 1. BASE DE DATOS DE PERSONAL (3 PESTAÑAS)",
             "🩺 2. PERMISOS, INCAPACIDADES, LICENCIAS Y VACACIONES",
+            "⚖️ 3. SANCIONES Y EXPEDIENTE",
         ])
 
         with tab_bd_personal:
@@ -2967,6 +3396,562 @@ else:
 
             st.markdown("</div>", unsafe_allow_html=True)
 
+        with tab_bd_sanciones:
+            df_san_bd = leer_pestana_df(PESTANA_SANCIONES, COLUMNAS_SANCIONES)
+            st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+
+            if df_san_bd.empty:
+                st.info(
+                    f"La pestaña **`{PESTANA_SANCIONES}`** aún no tiene registros cargados. "
+                    "Puedes agregarlos desde el módulo **⚖️ Sanciones y Expediente**."
+                )
+            else:
+                fs1, fs2, fs3, fs4, fs5 = st.columns([2, 1, 1, 1, 1])
+                busq_san = fs1.text_input(
+                    "🔎 Buscar por Cédula, Nombre, Apellido, Posic., ID o Resolución:",
+                    key="san_bd_busq",
+                ).strip().upper()
+
+                cats_s_disp = ["TODOS"] + sorted([str(x).strip() for x in df_san_bd["CATEGORIA_DOC"].unique() if str(x).strip() != ""])
+                f_san_cat = fs2.selectbox("Categoría:", cats_s_disp, key="san_bd_cat")
+
+                grav_s_disp = ["TODOS"] + sorted([str(x).strip() for x in df_san_bd["GRAVEDAD"].unique() if str(x).strip() != ""])
+                f_san_grav = fs3.selectbox("Gravedad:", grav_s_disp, key="san_bd_grav")
+
+                cen_s_disp = ["TODOS"] + sorted([str(x).strip() for x in df_san_bd["ASIGNADO_CENTRO"].unique() if str(x).strip() != ""])
+                f_san_cen = fs4.selectbox("Centro:", cen_s_disp, key="san_bd_cen")
+
+                est_s_disp = ["TODOS"] + sorted([str(x).strip() for x in df_san_bd["ESTADO_EXPEDIENTE"].unique() if str(x).strip() != ""])
+                f_san_est = fs5.selectbox("Estado:", est_s_disp, key="san_bd_est")
+
+                df_san_filt = df_san_bd.copy()
+                if busq_san:
+                    mask_s = (
+                        df_san_filt["CEDULA"].str.upper().str.contains(busq_san, na=False, regex=False)
+                        | df_san_filt["NOMBRE"].str.upper().str.contains(busq_san, na=False, regex=False)
+                        | df_san_filt["APELLIDO"].str.upper().str.contains(busq_san, na=False, regex=False)
+                        | df_san_filt["POSIC"].str.upper().str.contains(busq_san, na=False, regex=False)
+                        | df_san_filt["ID_EXPEDIENTE"].str.upper().str.contains(busq_san, na=False, regex=False)
+                        | df_san_filt["NUM_RESOLUCION_EXP"].str.upper().str.contains(busq_san, na=False, regex=False)
+                    )
+                    df_san_filt = df_san_filt[mask_s]
+                if f_san_cat != "TODOS":
+                    df_san_filt = df_san_filt[df_san_filt["CATEGORIA_DOC"].astype(str).str.strip() == f_san_cat]
+                if f_san_grav != "TODOS":
+                    df_san_filt = df_san_filt[df_san_filt["GRAVEDAD"].astype(str).str.strip() == f_san_grav]
+                if f_san_cen != "TODOS":
+                    df_san_filt = df_san_filt[df_san_filt["ASIGNADO_CENTRO"].astype(str).str.strip() == f_san_cen]
+                if f_san_est != "TODOS":
+                    df_san_filt = df_san_filt[df_san_filt["ESTADO_EXPEDIENTE"].astype(str).str.strip() == f_san_est]
+
+                cs_info, cs_dl = st.columns([3.5, 1.5])
+                cs_info.markdown(
+                    f"**Pestaña:** `{PESTANA_SANCIONES}` · **Consulta filtrada:** `{len(df_san_filt)}` de `{len(df_san_bd)}` registros (24 columnas)"
+                )
+                cs_dl.download_button(
+                    label=f"📥 Descargar Consulta ({len(df_san_filt)} reg.)",
+                    data=convertir_df_a_excel(df_san_filt, "Sanciones_y_Expediente"),
+                    file_name=f"Consulta_Sanciones_Expediente_{hoy_pa.strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    disabled=df_san_filt.empty,
+                    key="san_bd_dl",
+                )
+
+                st.dataframe(
+                    df_san_filt,
+                    use_container_width=True,
+                    height=520,
+                    column_config={
+                        "ENLACE_DOCUMENTO_DRIVE": st.column_config.LinkColumn("Documento Drive", display_text="📎 Abrir respaldo")
+                    },
+                )
+
+            st.markdown("</div>", unsafe_allow_html=True)  
+
+    # ==========================================
+    # MÓDULO 5B: SANCIONES, ARRESTOS Y EXPEDIENTE DOCUMENTAL + MINI-DASHBOARD
+    # ==========================================
+    elif modulo_activo == "⚖️ Sanciones y Expediente":
+        col_sn1, col_sn2 = st.columns([5, 1])
+        with col_sn1:
+            st.markdown(
+                "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>⚖️ SANCIONES, ARRESTOS Y EXPEDIENTE DOCUMENTAL</h1>",
+                unsafe_allow_html=True,
+            )
+        with col_sn2:
+            st.write("")
+            if st.button("🔄 Actualizar", use_container_width=True, key="btn_sync_sanciones"):
+                leer_pestana_df.clear()
+                st.rerun()
+
+        if "san_form_reset" not in st.session_state:
+            st.session_state.san_form_reset = 0
+        san_reset_n = st.session_state.san_form_reset
+
+        if st.session_state.get("san_msg_ok"):
+            st.success(st.session_state.pop("san_msg_ok"))
+
+        lista_categorias_exp = [
+            "ARRESTO",
+            "SANCIÓN / AMONESTACIÓN",
+            "MEMORANDO",
+            "FELICITACIÓN",
+            "DOCUMENTO VARIOS",
+            "EVALUACIÓN / INFORME",
+        ]
+        lista_gravedad_exp = ["N/A", "LEVE", "GRAVE", "GRAVÍSIMA"]
+        lista_estados_exp = [
+            "EN TRÁMITE",
+            "EN CUMPLIMIENTO",
+            "CUMPLIDO",
+            "APELADO",
+            "ARCHIVADO",
+            "ANULADO",
+        ]
+
+        tab_san_dash, tab_san_reg = st.tabs([
+            "📊 1. MINI-DASHBOARD DISCIPLINARIO Y ACTUALIZACIÓN",
+            "📝 2. REGISTRAR SANCIÓN, ARRESTO O DOCUMENTO",
+        ])
+
+        with tab_san_dash:
+            df_san_live = leer_pestana_df(PESTANA_SANCIONES, COLUMNAS_SANCIONES)
+            st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+
+            if df_san_live.empty:
+                st.info(f"Aún no hay expedientes registrados en **`{PESTANA_SANCIONES}`**. Usa la pestaña 2 para cargar el primero.")
+            else:
+                df_s = df_san_live.copy()
+                df_s["_CAT"] = df_s["CATEGORIA_DOC"].apply(_dash_norm_txt)
+                df_s["_EST"] = df_s["ESTADO_EXPEDIENTE"].apply(_dash_norm_txt)
+                df_s["_CEN"] = df_s["ASIGNADO_CENTRO"].apply(
+                    lambda x: DASH_MAPA_CENTROS.get(_dash_norm_txt(x), _dash_norm_txt(x).replace("/", ""))
+                )
+                df_s["_DIAS"] = pd.to_numeric(df_s["DIAS_SANCION_ARRESTO"], errors="coerce").fillna(0).astype(int)
+
+                tot_exp = len(df_s)
+                act_sanc = int(
+                    (df_s["_CAT"].isin(["ARRESTO", "SANCIÓN / AMONESTACIÓN"]) & df_s["_EST"].isin(["EN TRÁMITE", "EN CUMPLIMIENTO"])).sum()
+                )
+                tot_dias_arr = int(df_s["_DIAS"].sum())
+                tot_felic = int((df_s["_CAT"] == "FELICITACIÓN").sum())
+                tot_docs_drv = int(df_s["ENLACE_DOCUMENTO_DRIVE"].astype(str).str.startswith("http").sum())
+
+                sk1, sk2, sk3, sk4, sk5 = st.columns(5)
+                sk1.metric("Total Expedientes", f"{tot_exp}")
+                sk2.metric("Sanciones / Arrestos Activos", f"{act_sanc}")
+                sk3.metric("Total Días Arresto/Sanción", f"{tot_dias_arr}")
+                sk4.metric("Felicitaciones / Méritos", f"{tot_felic}")
+                sk5.metric("Con Respaldo Drive", f"{tot_docs_drv}")
+
+                st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
+
+                rows_cat_s = []
+                for cat_n in lista_categorias_exp:
+                    sub_cat = df_s[df_s["_CAT"] == cat_n]
+                    cnt_c = len(sub_cat)
+                    rows_cat_s.append({
+                        "CATEGORÍA": cat_n,
+                        "REGISTROS": cnt_c,
+                        "DÍAS ACUM.": int(sub_cat["_DIAS"].sum()),
+                        "EN TRÁMITE / CUMPL.": int(sub_cat["_EST"].isin(["EN TRÁMITE", "EN CUMPLIMIENTO"]).sum()),
+                        "CUMPLIDO / ARCH.": int(sub_cat["_EST"].isin(["CUMPLIDO", "ARCHIVADO"]).sum()),
+                        "% DEL TOTAL": f"{(cnt_c / tot_exp * 100.0):.1f}%" if tot_exp > 0 else "0.0%",
+                    })
+
+                rows_cen_s = []
+                for cen_n in lista_centros_8:
+                    sub_ce = df_s[df_s["_CEN"] == cen_n]
+                    rows_cen_s.append({
+                        "CENTRO": cen_n,
+                        "ARRESTO": int((sub_ce["_CAT"] == "ARRESTO").sum()),
+                        "SANCIÓN": int((sub_ce["_CAT"] == "SANCIÓN / AMONESTACIÓN").sum()),
+                        "MEMORANDO": int((sub_ce["_CAT"] == "MEMORANDO").sum()),
+                        "FELICITACIÓN": int((sub_ce["_CAT"] == "FELICITACIÓN").sum()),
+                        "DOCS VARIOS": int((sub_ce["_CAT"] == "DOCUMENTO VARIOS").sum()),
+                        "EVALUACIÓN": int((sub_ce["_CAT"] == "EVALUACIÓN / INFORME").sum()),
+                        "TOTAL": len(sub_ce),
+                    })
+
+                cs_izq, cs_der = st.columns([1.05, 1.35])
+                with cs_izq:
+                    st.markdown("<h3 style='color: #00ffff;'>📋 1. Resumen por Categoría</h3>", unsafe_allow_html=True)
+                    st.dataframe(pd.DataFrame(rows_cat_s), use_container_width=True, hide_index=True)
+                with cs_der:
+                    st.markdown("<h3 style='color: #00ffff;'>🏢 2. Expedientes por Centro Operativo</h3>", unsafe_allow_html=True)
+                    st.dataframe(pd.DataFrame(rows_cen_s), use_container_width=True, hide_index=True)
+
+                st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
+                st.markdown("<h3 style='color: #00ffff;'>✏️ Actualizar Estado o Agregar Enlace Drive</h3>", unsafe_allow_html=True)
+
+                idx_exp_upd = st.selectbox(
+                    "Selecciona el expediente a actualizar:",
+                    list(df_san_live.index),
+                    format_func=lambda i: (
+                        f"{df_san_live.loc[i, 'ID_EXPEDIENTE']} | {df_san_live.loc[i, 'CATEGORIA_DOC']} | "
+                        f"{df_san_live.loc[i, 'RANGO']} {df_san_live.loc[i, 'NOMBRE']} {df_san_live.loc[i, 'APELLIDO']} "
+                        f"({df_san_live.loc[i, 'ESTADO_EXPEDIENTE']})"
+                    ),
+                    key="san_upd_sel",
+                )
+                reg_exp_u = df_san_live.loc[idx_exp_upd]
+                with st.form(f"form_upd_exp_{idx_exp_upd}"):
+                    u_e1, u_e2, u_e3 = st.columns([1, 1.5, 1.5])
+                    est_act_e = str(reg_exp_u.get("ESTADO_EXPEDIENTE", "")).upper()
+                    upd_est = u_e1.selectbox(
+                        "Nuevo ESTADO_EXPEDIENTE",
+                        lista_estados_exp,
+                        index=lista_estados_exp.index(est_act_e) if est_act_e in lista_estados_exp else 0,
+                    )
+                    upd_link = u_e2.text_input("ENLACE_DOCUMENTO_DRIVE", value=str(reg_exp_u.get("ENLACE_DOCUMENTO_DRIVE", "")))
+                    upd_nota = u_e3.text_input("Nota adicional de seguimiento (opcional)")
+
+                    if st.form_submit_button("💾 Guardar Actualización del Expediente", use_container_width=True):
+                        try:
+                            actualizar_fila_sancion(
+                                indice_df=int(idx_exp_upd),
+                                nuevo_estado=upd_est,
+                                nuevo_enlace=upd_link,
+                                nota_extra=upd_nota,
+                                usuario_actual=st.session_state.get("usuario_actual", "ADMINISTRADOR"),
+                                timestamp_str=timestamp_actual,
+                            )
+                            st.success(f"✔️ Expediente **{reg_exp_u['ID_EXPEDIENTE']}** actualizado a **{upd_est}**.")
+                            st.rerun()
+                        except Exception as e_uexp:
+                            st.error(f"❌ Error al actualizar el expediente: {e_uexp}")
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with tab_san_reg:
+            def _opciones_y_indice_san(lista_base, valor_raw, mapa_norm=None):
+                val = limpiar_valor(valor_raw)
+                if not val:
+                    return list(lista_base), 0
+                if mapa_norm:
+                    val = mapa_norm.get(val, val)
+                for i_opt, opt in enumerate(lista_base):
+                    if limpiar_valor(opt) == val:
+                        return list(lista_base), i_opt
+                return [lista_base[0], val] + list(lista_base[1:]), 1
+
+            st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+            st.markdown(
+                "<h3 style='color: #00ffff; margin-top: 0;'>🔎 Buscar Unidad por Posición o Cédula (Autocompletar)</h3>",
+                unsafe_allow_html=True,
+            )
+            busq_san_auto = st.text_input(
+                "Ingresa la POSICIÓN o CÉDULA de la unidad y presiona Enter:",
+                placeholder="Ej.: 28089 o 4-778-277",
+                key=f"san_auto_buscar_{san_reset_n}",
+            ).strip().upper()
+
+            unidad_san = None
+            id_match_san = "manual"
+
+            if busq_san_auto:
+                frames_s = []
+                for p_src in (PESTANA_PERSONAL, PESTANA_AGREGADAS, PESTANA_JUB_PRES_TRAS):
+                    df_tmp_s = leer_pestana_df(p_src, COLUMNAS_OFICIALES)
+                    if not df_tmp_s.empty:
+                        df_tmp_s = df_tmp_s.copy()
+                        df_tmp_s["_ORIGEN_HOJA"] = p_src
+                        frames_s.append(df_tmp_s)
+
+                if frames_s:
+                    df_busq_s = pd.concat(frames_s, ignore_index=True)
+                    pos_s = df_busq_s["POSIC"].apply(limpiar_valor)
+                    ced_s = df_busq_s["CEDULA"].apply(limpiar_valor)
+
+                    df_hits_s = df_busq_s[(pos_s == busq_san_auto) | (ced_s == busq_san_auto)]
+                    if df_hits_s.empty:
+                        df_hits_s = df_busq_s[
+                            pos_s.str.contains(busq_san_auto, na=False, regex=False)
+                            | ced_s.str.contains(busq_san_auto, na=False, regex=False)
+                        ]
+
+                    if df_hits_s.empty:
+                        st.warning(f"⚠️ No se encontró unidad con `{busq_san_auto}`. Puedes llenar los campos manualmente.")
+                    elif len(df_hits_s) == 1:
+                        unidad_san = df_hits_s.iloc[0]
+                        id_match_san = f"{unidad_san.get('_ORIGEN_HOJA', '')}_{limpiar_valor(unidad_san.get('CEDULA', ''))}_{limpiar_valor(unidad_san.get('POSIC', ''))}"
+                        st.success(
+                            f"✅ Unidad cargada desde **`{unidad_san['_ORIGEN_HOJA']}`**: "
+                            f"**{unidad_san.get('RANGO', '')} {unidad_san.get('NOMBRE', '')} {unidad_san.get('APELLIDO', '')}**."
+                        )
+                    else:
+                        idx_hs = st.selectbox(
+                            f"Se encontraron {len(df_hits_s)} coincidencias, selecciona la unidad:",
+                            list(df_hits_s.index),
+                            format_func=lambda i: (
+                                f"[{df_hits_s.loc[i, '_ORIGEN_HOJA']}] {df_hits_s.loc[i, 'RANGO']} | "
+                                f"POSIC: {df_hits_s.loc[i, 'POSIC']} | {df_hits_s.loc[i, 'NOMBRE']} {df_hits_s.loc[i, 'APELLIDO']} | "
+                                f"CÉD: {df_hits_s.loc[i, 'CEDULA']}"
+                            ),
+                            key=f"san_auto_pick_{busq_san_auto}_{san_reset_n}",
+                        )
+                        unidad_san = df_hits_s.loc[idx_hs]
+                        id_match_san = f"{unidad_san.get('_ORIGEN_HOJA', '')}_{limpiar_valor(unidad_san.get('CEDULA', ''))}_{limpiar_valor(unidad_san.get('POSIC', ''))}"
+            st.markdown("</div>", unsafe_allow_html=True)
+            st.write("")
+
+            mapa_est_san = {
+                "P.N": "P.N", "P.N.": "P.N", "PN": "P.N", "PNP": "P.N",
+                "M.N.J": "MNJ", "M.N.J.": "MNJ", "MNJ": "MNJ",
+                "SENAN": "SENAN", "SENAFRONT": "SENAFRONT", "MINSEG": "MINSEG",
+            }
+            s_rango_v = unidad_san.get("RANGO", "") if unidad_san is not None else ""
+            s_posic_v = limpiar_valor(unidad_san.get("POSIC", "")) if unidad_san is not None else ""
+            s_nom_v = limpiar_valor(unidad_san.get("NOMBRE", "")) if unidad_san is not None else ""
+            s_ape_v = limpiar_valor(unidad_san.get("APELLIDO", "")) if unidad_san is not None else ""
+            s_ced_v = limpiar_valor(unidad_san.get("CEDULA", "")) if unidad_san is not None else ""
+            s_est_v = unidad_san.get("ESTAMENTO", "") if unidad_san is not None else ""
+            s_cen_v = unidad_san.get("ASIGNADO_CENTRO", "") if unidad_san is not None else ""
+            s_dep_v = unidad_san.get("DEPARTAMENTO", "") if unidad_san is not None else ""
+            s_tur_v = unidad_san.get("TURNO", "") if unidad_san is not None else ""
+            s_grp_v = limpiar_valor(unidad_san.get("GRUPO", "")) if unidad_san is not None else ""
+
+            o_ran_s, i_ran_s = _opciones_y_indice_san(lista_rangos, s_rango_v, DASH_MAPA_RANGOS)
+            o_est_s, i_est_s = _opciones_y_indice_san(lista_estamentos, s_est_v, mapa_est_san)
+            o_cen_s, i_cen_s = _opciones_y_indice_san(lista_centros, s_cen_v, DASH_MAPA_CENTROS)
+            o_dep_s, i_dep_s = _opciones_y_indice_san(lista_departamentos, s_dep_v)
+            o_tur_s, i_tur_s = _opciones_y_indice_san(lista_turnos, s_tur_v)
+            ks = f"{id_match_san}_{san_reset_n}"
+
+            st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+            st.markdown("<h3 style='color: #00d4ff;'>1. Identificación y Ubicación (Autorrellenable)</h3>", unsafe_allow_html=True)
+            c1, c2, c3, c4, c5 = st.columns(5)
+            san_rango = c1.selectbox("RANGO *", o_ran_s, index=i_ran_s, key=f"san_rango_{ks}")
+            san_posic = c2.text_input("POSIC", value=s_posic_v, key=f"san_posic_{ks}")
+            san_nombre = c3.text_input("NOMBRE *", value=s_nom_v, key=f"san_nombre_{ks}")
+            san_apellido = c4.text_input("APELLIDO *", value=s_ape_v, key=f"san_apellido_{ks}")
+            san_cedula = c5.text_input("CÉDULA *", value=s_ced_v, key=f"san_cedula_{ks}")
+
+            c6, c7, c8, c9, c10 = st.columns(5)
+            san_estamento = c6.selectbox("ESTAMENTO", o_est_s, index=i_est_s, key=f"san_est_{ks}")
+            san_centro = c7.selectbox("ASIGNADO_CENTRO", o_cen_s, index=i_cen_s, key=f"san_cen_{ks}")
+            san_depto = c8.selectbox("DEPARTAMENTO", o_dep_s, index=i_dep_s, key=f"san_dep_{ks}")
+            san_turno = c9.selectbox("TURNO", o_tur_s, index=i_tur_s, key=f"san_tur_{ks}")
+            san_grupo = c10.text_input("GRUPO", value=s_grp_v, key=f"san_grp_{ks}")
+
+            st.markdown("<h3 style='color: #00d4ff;'>2. Detalle de la Sanción, Arresto o Documento</h3>", unsafe_allow_html=True)
+            d1, d2, d3, d4 = st.columns(4)
+            san_cat = d1.selectbox("CATEGORIA_DOC *", lista_categorias_exp, key=f"san_cat_{san_reset_n}")
+            san_grav = d2.selectbox("GRAVEDAD", lista_gravedad_exp, key=f"san_grav_{san_reset_n}")
+            san_dias = d3.number_input("DIAS_SANCION_ARRESTO", min_value=0, max_value=365, value=0, step=1, key=f"san_dias_{san_reset_n}")
+            san_estado = d4.selectbox("ESTADO_EXPEDIENTE", lista_estados_exp, key=f"san_estado_{san_reset_n}")
+
+            f1, f2, f3, f4 = st.columns(4)
+            san_f_hecho = f1.date_input("FECHA_HECHO_EMISION *", value=hoy_pa, key=f"san_fhecho_{san_reset_n}")
+            usa_fechas_cump = f2.checkbox(
+                "¿Registrar fechas de cumplimiento?",
+                value=(san_cat in ("ARRESTO", "SANCIÓN / AMONESTACIÓN")),
+                key=f"san_chk_cump_{san_reset_n}",
+            )
+            san_f_ini = f3.date_input("FECHA_INICIO_CUMPLIMIENTO", value=hoy_pa, disabled=not usa_fechas_cump, key=f"san_fini_{san_reset_n}")
+            san_f_fin = f4.date_input("FECHA_FIN_CUMPLIMIENTO", value=hoy_pa, disabled=not usa_fechas_cump, key=f"san_ffin_{san_reset_n}")
+
+            r1, r2 = st.columns(2)
+            san_resol = r1.text_input("NUM_RESOLUCION_EXP", placeholder="Ej.: RES-DISC-041-2026", key=f"san_resol_{san_reset_n}")
+            san_autoridad = r2.text_input("AUTORIDAD_QUE_IMPONE", placeholder="Ej.: DIRECCIÓN CON-C5 / DRP", key=f"san_aut_{san_reset_n}")
+            san_motivo = st.text_area("RESUMEN_MOTIVO_ARTICULO *", height=85, key=f"san_motivo_{san_reset_n}")
+
+            st.markdown("<h3 style='color: #00d4ff;'>3. Respaldo Digital (Google Drive)</h3>", unsafe_allow_html=True)
+            dr1, dr2 = st.columns([1.4, 1.6])
+            san_archivo = dr1.file_uploader(
+                "📎 Adjuntar PDF o foto (carpeta 'Expedientes_CON_RRHH'):",
+                type=["pdf", "png", "jpg", "jpeg"],
+                key=f"san_file_{san_reset_n}",
+            )
+            san_enlace = dr2.text_input(
+                "ENLACE_DOCUMENTO_DRIVE (o pega el enlace directo de Drive):",
+                placeholder="https://drive.google.com/file/d/...",
+                key=f"san_enlace_{san_reset_n}",
+            )
+
+            if st.button("💾 Guardar en Sanciones_y_Expediente", use_container_width=True, key=f"btn_guardar_san_{san_reset_n}"):
+                if not san_nombre.strip() or not san_apellido.strip() or not san_cedula.strip() or san_rango == "SELECCIONAR":
+                    st.error("❌ Completa Rango, Nombre, Apellido y Cédula.")
+                elif not san_motivo.strip():
+                    st.error("❌ Ingresa el resumen del motivo, artículo o contenido del documento.")
+                elif usa_fechas_cump and san_f_fin < san_f_ini:
+                    st.error("❌ La fecha fin de cumplimiento no puede ser anterior a la fecha inicio.")
+                else:
+                    try:
+                        ws_san = obtener_o_crear_worksheet(PESTANA_SANCIONES, COLUMNAS_SANCIONES)
+                        filas_ex_s = len(ws_san.get_all_values())
+                        id_exp = f"EXP-{hoy_pa.year}-{max(1, filas_ex_s):03d}"
+
+                        enlace_final = san_enlace.strip()
+                        aviso_drive = ""
+                        if san_archivo is not None and not enlace_final:
+                            try:
+                                ext_arch = san_archivo.name.split(".")[-1].lower()
+                                nom_drive = f"{id_exp}_{limpiar_valor(san_posic) or limpiar_valor(san_cedula)}.{ext_arch}"
+                                enlace_final = subir_respaldo_expediente_drive(san_archivo, nom_drive)
+                            except Exception as e_drv:
+                                aviso_drive = f" (Aviso Drive: {e_drv})"
+
+                        fila_san = [
+                            id_exp, timestamp_actual,
+                            limpiar_valor(st.session_state.get("usuario_actual", "ADMINISTRADOR")),
+                            limpiar_valor(san_rango), limpiar_valor(san_posic),
+                            limpiar_valor(san_nombre), limpiar_valor(san_apellido),
+                            limpiar_valor(san_cedula), limpiar_valor(san_estamento),
+                            limpiar_valor(san_centro), limpiar_valor(san_depto),
+                            limpiar_valor(san_turno), limpiar_valor(san_grupo),
+                            limpiar_valor(san_cat), limpiar_valor(san_grav), int(san_dias),
+                            str(san_f_hecho),
+                            str(san_f_ini) if usa_fechas_cump else "",
+                            str(san_f_fin) if usa_fechas_cump else "",
+                            limpiar_valor(san_resol), limpiar_valor(san_autoridad),
+                            limpiar_valor(san_estado), limpiar_valor(san_motivo), enlace_final,
+                        ]
+                        ws_san.append_row(fila_san, value_input_option="USER_ENTERED")
+                        leer_pestana_df.clear()
+                        st.session_state.san_msg_ok = f"✔️ Expediente **{id_exp}** guardado en **`{PESTANA_SANCIONES}`**.{aviso_drive}"
+                        st.session_state.san_form_reset += 1
+                        st.rerun()
+                    except Exception as e_san:
+                        st.error(f"❌ Error al guardar en `{PESTANA_SANCIONES}`: {e_san}")
+
+            st.markdown("</div>", unsafe_allow_html=True)    
+
+    # ==========================================
+    # MÓDULO 5C: HOJA MECANIZADA INTEGRAL DE PERSONAL (60 CAMPOS + HISTORIALES)
+    # ==========================================
+    elif modulo_activo == "🪪 Hoja Mecanizada":
+        col_hm1, col_hm2 = st.columns([5, 1])
+        with col_hm1:
+            st.markdown(
+                "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>🪪 HOJA MECANIZADA INTEGRAL DE PERSONAL</h1>",
+                unsafe_allow_html=True,
+            )
+        with col_hm2:
+            st.write("")
+            if st.button("🔄 Actualizar", use_container_width=True, key="btn_sync_hm"):
+                leer_pestana_df.clear()
+                st.rerun()
+
+        st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+        st.caption(
+            "Genera la ficha integral oficial con los **60 campos completos** de la unidad, "
+            "cruzada automáticamente con sus **Permisos/Incapacidades/Licencias/Vacaciones** y su **Cuadro Disciplinario/Sanciones**."
+        )
+
+        hb1, hb2 = st.columns([2, 1.3])
+        busq_hm = hb1.text_input(
+            "🔎 Ingresa Posición, Cédula, Nombre o Apellido de la unidad (y presiona Enter):",
+            placeholder="Ej.: 28089 o 4-778-277",
+            key="hm_buscar",
+        ).strip().upper()
+        foto_hm = hb2.file_uploader(
+            "📷 Foto carnet de la unidad (opcional):",
+            type=["png", "jpg", "jpeg"],
+            key="hm_foto_up",
+        )
+
+        if not busq_hm:
+            st.info("Escribe la **Posición, Cédula, Nombre o Apellido** de la unidad para generar su Hoja Mecanizada.")
+        else:
+            frames_hm = []
+            for p_src in (PESTANA_PERSONAL, PESTANA_AGREGADAS, PESTANA_JUB_PRES_TRAS):
+                df_tmp_hm = leer_pestana_df(p_src, COLUMNAS_OFICIALES)
+                if not df_tmp_hm.empty:
+                    df_tmp_hm = df_tmp_hm.copy()
+                    df_tmp_hm["_ORIGEN_HOJA"] = p_src
+                    frames_hm.append(df_tmp_hm)
+
+            if not frames_hm:
+                st.warning("⚠️ No hay datos cargados en las pestañas de personal.")
+            else:
+                df_all_hm = pd.concat(frames_hm, ignore_index=True)
+                mask_hm = (
+                    df_all_hm["POSIC"].apply(limpiar_valor).str.contains(busq_hm, na=False, regex=False)
+                    | df_all_hm["CEDULA"].apply(limpiar_valor).str.contains(busq_hm, na=False, regex=False)
+                    | df_all_hm["NOMBRE"].apply(limpiar_valor).str.contains(busq_hm, na=False, regex=False)
+                    | df_all_hm["APELLIDO"].apply(limpiar_valor).str.contains(busq_hm, na=False, regex=False)
+                )
+                df_hits_hm = df_all_hm[mask_hm]
+
+                if df_hits_hm.empty:
+                    st.warning(f"⚠️ No se encontró ninguna unidad con el criterio `{busq_hm}`.")
+                else:
+                    idx_hm = st.selectbox(
+                        f"Selecciona la unidad ({len(df_hits_hm)} coincidencia(s)):",
+                        list(df_hits_hm.index),
+                        format_func=lambda i: (
+                            f"[{df_hits_hm.loc[i, '_ORIGEN_HOJA']}] {df_hits_hm.loc[i, 'RANGO']} | "
+                            f"POSIC: {df_hits_hm.loc[i, 'POSIC']} | {df_hits_hm.loc[i, 'NOMBRE']} {df_hits_hm.loc[i, 'APELLIDO']} | "
+                            f"CÉD: {df_hits_hm.loc[i, 'CEDULA']}"
+                        ),
+                        key=f"hm_sel_{busq_hm}",
+                    )
+                    u_sel = df_hits_hm.loc[idx_hm]
+                    ced_hm = limpiar_valor(u_sel.get("CEDULA", ""))
+                    pos_hm = limpiar_valor(u_sel.get("POSIC", ""))
+                    orig_hm = str(u_sel.get("_ORIGEN_HOJA", ""))
+
+                    # Cruzar historial en Permiso,incapacidad,licencia
+                    df_nov_all = leer_pestana_df(PESTANA_NOVEDADES, COLUMNAS_NOVEDADES)
+                    if not df_nov_all.empty:
+                        m_nv = (
+                            (df_nov_all["CEDULA"].apply(limpiar_valor) == ced_hm) if ced_hm else False
+                        ) | (
+                            (df_nov_all["POSIC"].apply(limpiar_valor) == pos_hm) if pos_hm else False
+                        )
+                        df_nov_u = df_nov_all[m_nv].copy()
+                    else:
+                        df_nov_u = pd.DataFrame(columns=COLUMNAS_NOVEDADES)
+
+                    # Cruzar historial en Sanciones_y_Expediente
+                    df_san_all = leer_pestana_df(PESTANA_SANCIONES, COLUMNAS_SANCIONES)
+                    if not df_san_all.empty:
+                        m_sn = (
+                            (df_san_all["CEDULA"].apply(limpiar_valor) == ced_hm) if ced_hm else False
+                        ) | (
+                            (df_san_all["POSIC"].apply(limpiar_valor) == pos_hm) if pos_hm else False
+                        )
+                        df_san_u = df_san_all[m_sn].copy()
+                    else:
+                        df_san_u = pd.DataFrame(columns=COLUMNAS_SANCIONES)
+
+                    foto_b64_str = base64.b64encode(foto_hm.getvalue()).decode() if foto_hm is not None else ""
+                    foto_mime_str = (foto_hm.type or "image/png") if foto_hm is not None else "image/png"
+                    usr_emite = st.session_state.get("usuario_actual", "ADMINISTRADOR")
+
+                    html_doc = generar_html_hoja_mecanizada(
+                        u_sel.to_dict(), orig_hm, df_nov_u, df_san_u, usr_emite, timestamp_actual, foto_b64_str, foto_mime_str
+                    )
+                    xlsx_doc = generar_excel_hoja_mecanizada(
+                        u_sel.to_dict(), orig_hm, df_nov_u, df_san_u, usr_emite, timestamp_actual
+                    )
+
+                    base_fname = f"Hoja_Mecanizada_{pos_hm or ced_hm}_{limpiar_valor(u_sel.get('APELLIDO', '')).replace(' ', '_')}_{hoy_pa.strftime('%Y%m%d')}"
+                    bd1, bd2 = st.columns(2)
+                    bd1.download_button(
+                        "📥 Descargar Hoja Mecanizada (HTML / Imprimir a PDF)",
+                        data=html_doc.encode("utf-8"),
+                        file_name=f"{base_fname}.html",
+                        mime="text/html",
+                        use_container_width=True,
+                        key=f"hm_dl_html_{idx_hm}",
+                    )
+                    bd2.download_button(
+                        "📥 Descargar Hoja Mecanizada (Excel Oficial .xlsx)",
+                        data=xlsx_doc,
+                        file_name=f"{base_fname}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key=f"hm_dl_xlsx_{idx_hm}",
+                    )
+
+                    st.caption("💡 Haz clic en **🖨️ Imprimir / Guardar en PDF** dentro de la vista previa para imprimir directo o guardar como PDF oficial en tamaño Carta.")
+                    components.html(html_doc, height=960, scrolling=True)
+
+        st.markdown("</div>", unsafe_allow_html=True)
+    
     # ==========================================
     # MÓDULO 6: CHAT INSTITUCIONAL EN VIVO (CONECTADO A GOOGLE SHEETS)
     # ==========================================
