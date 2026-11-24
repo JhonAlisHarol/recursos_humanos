@@ -3,6 +3,7 @@ import pandas as pd
 import glob
 import base64
 import re
+import html
 import unicodedata
 from io import BytesIO
 from datetime import datetime, date, timedelta
@@ -179,6 +180,7 @@ PESTANA_AGREGADAS = "Unidades_Agregadas"
 PESTANA_JUB_PRES_TRAS = "Vac.Jubilacion_U.Prestados_U.Trasladados"
 PESTANA_NOVEDADES = "Permiso,incapacidad,licencia"
 PESTANA_PARTE_DIARIO = "Parte_Diario_Personal"
+PESTANA_CHAT = "Chat_Institucional"
 
 PESTANAS_UNIDADES = [
     PESTANA_PERSONAL,
@@ -227,6 +229,8 @@ COLUMNAS_PARTE_DIARIO = [
     "ASISTENCIA_TURNO", "MOTIVO_FALTA", "TIPO_NOVEDAD_CRUCE",
     "DOCUMENTO_RESPALDO", "OBSERVACION",
 ]
+
+COLUMNAS_CHAT = ["TIMESTAMP", "USUARIO", "PRIORIDAD", "MENSAJE"]
 
 JERARQUIA_RANGOS = {
     "COMISIONADO": 1,
@@ -509,6 +513,8 @@ def obtener_o_crear_worksheet(nombre_pestana, columnas_hdr=None):
             columnas_hdr = COLUMNAS_NOVEDADES
         elif nombre_pestana == PESTANA_PARTE_DIARIO:
             columnas_hdr = COLUMNAS_PARTE_DIARIO
+        elif nombre_pestana == PESTANA_CHAT:
+            columnas_hdr = COLUMNAS_CHAT
         else:
             columnas_hdr = COLUMNAS_OFICIALES
     cliente_gs = conectar_google_sheets()
@@ -683,6 +689,41 @@ def actualizar_fila_parte_diario(row_sheet, fila_20):
     ws = obtener_o_crear_worksheet(PESTANA_PARTE_DIARIO, COLUMNAS_PARTE_DIARIO)
     ws.update(range_name=f"A{row_sheet}:T{row_sheet}", values=[fila_20], value_input_option="USER_ENTERED")
     leer_parte_diario_df.clear()
+
+@st.cache_data(ttl=10)
+def leer_chat_df():
+    """Lee los mensajes compartidos de la pestaña Chat_Institucional con caché de 10 s."""
+    try:
+        ws = obtener_o_crear_worksheet(PESTANA_CHAT, COLUMNAS_CHAT)
+        valores = ws.get_all_values()
+        if not valores or len(valores) <= 1:
+            return pd.DataFrame(columns=COLUMNAS_CHAT)
+        num_cols = len(COLUMNAS_CHAT)
+        filas_norm = [
+            f[:num_cols] + [""] * max(0, num_cols - len(f))
+            for f in valores[1:]
+            if any(str(c).strip() != "" for c in f[:num_cols])
+        ]
+        if not filas_norm:
+            return pd.DataFrame(columns=COLUMNAS_CHAT)
+        return pd.DataFrame(filas_norm, columns=COLUMNAS_CHAT)
+    except Exception:
+        return pd.DataFrame(columns=COLUMNAS_CHAT)
+
+def enviar_mensaje_chat(usuario, prioridad, mensaje, timestamp_str):
+    """Guarda un mensaje nuevo en Chat_Institucional visible para todos los usuarios logueados."""
+    texto_limpio = str(mensaje).strip()
+    if not texto_limpio:
+        return
+    ws = obtener_o_crear_worksheet(PESTANA_CHAT, COLUMNAS_CHAT)
+    fila_chat = [
+        timestamp_str,
+        limpiar_valor(usuario) or "USUARIO",
+        limpiar_valor(prioridad) or "NORMAL",
+        texto_limpio,
+    ]
+    ws.append_row(fila_chat, value_input_option="RAW")
+    leer_chat_df.clear()
 
 @st.cache_data(ttl=60)
 def leer_pestana_df(nombre_pestana, columnas_esperadas):
@@ -1051,6 +1092,7 @@ else:
                 "🩺 Permisos, Incapacidades y Licencias",
                 "📋 Parte Diario de Personal",
                 "📊 Consulta de Bases de Datos",
+                "💬 Chat Institucional",
             ],
             index=0,
             label_visibility="collapsed",
@@ -1066,6 +1108,22 @@ else:
     hoy_pa = ahora_pa.date()
     hora_actual_pa = ahora_pa.strftime("%H:%M")
     timestamp_actual = ahora_pa.strftime("%Y-%m-%d %H:%M:%S")
+
+    # --- CINTA AUTOMÁTICA DE AVISO URGENTE DEL DÍA (VISIBLE PARA TODOS LOS CONECTADOS) ---
+    if modulo_activo != "💬 Chat Institucional":
+        df_chat_aviso = leer_chat_df()
+        if not df_chat_aviso.empty:
+            hoy_str_chat = hoy_pa.strftime("%Y-%m-%d")
+            urg_hoy = df_chat_aviso[
+                df_chat_aviso["TIMESTAMP"].astype(str).str.startswith(hoy_str_chat)
+                & (df_chat_aviso["PRIORIDAD"].astype(str).str.upper() == "URGENTE")
+            ]
+            if not urg_hoy.empty:
+                ult_urg = urg_hoy.iloc[-1]
+                st.warning(
+                    f"🚨 **AVISO URGENTE EN CHAT ({ult_urg['TIMESTAMP'][11:16]} · {ult_urg['USUARIO']}):** "
+                    f"{ult_urg['MENSAJE']}"
+                )
 
     # ==========================================
     # MÓDULO 0: DASHBOARD EJECUTIVO DINÁMICO (PRIMERA VISTA ARRIBA)
@@ -2855,3 +2913,158 @@ else:
                 st.dataframe(df_nov_filt, use_container_width=True, height=520)
 
             st.markdown("</div>", unsafe_allow_html=True)
+
+    # ==========================================
+    # MÓDULO 6: CHAT INSTITUCIONAL EN VIVO (CONECTADO A GOOGLE SHEETS)
+    # ==========================================
+    elif modulo_activo == "💬 Chat Institucional":
+        col_ch1, col_ch2 = st.columns([5, 1])
+        with col_ch1:
+            st.markdown(
+                "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>💬 CHAT INSTITUCIONAL EN VIVO — CON-C5</h1>",
+                unsafe_allow_html=True,
+            )
+        with col_ch2:
+            st.write("")
+            if st.button("🔄 Actualizar Chat", use_container_width=True, key="btn_sync_chat"):
+                leer_chat_df.clear()
+                st.rerun()
+
+        st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+        st.caption(
+            "Sala compartida en tiempo real para todos los usuarios conectados. "
+            "Los mensajes se sincronizan automáticamente cada 10 segundos y quedan guardados en **`Chat_Institucional`**."
+        )
+
+        cf_c1, cf_c2, cf_c3 = st.columns([1.2, 1, 2])
+        filtro_periodo_chat = cf_c1.selectbox(
+            "📅 Mostrar mensajes:",
+            ["Solo hoy", "Últimos 3 días", "Últimos 7 días", "Todo el historial"],
+            index=0,
+            key="chat_filtro_periodo",
+        )
+        filtro_prio_chat = cf_c2.selectbox(
+            "🏷️ Prioridad:",
+            ["TODOS", "NORMAL", "URGENTE"],
+            index=0,
+            key="chat_filtro_prio",
+        )
+        busq_chat = cf_c3.text_input(
+            "🔎 Buscar en el chat (usuario o palabra clave):",
+            key="chat_busqueda",
+        ).strip().upper()
+
+        usuario_sesion_chat = limpiar_valor(st.session_state.get("usuario_actual", "USUARIO"))
+
+        def _renderizar_historial_chat():
+            df_c = leer_chat_df()
+            if df_c.empty:
+                st.info("💬 Aún no hay mensajes en la sala. Escribe el primer mensaje abajo.")
+                return
+
+            df_ver = df_c.copy()
+            hoy_dt_pa = datetime.now(pytz.timezone("America/Panama")).date()
+            if filtro_periodo_chat == "Solo hoy":
+                df_ver = df_ver[df_ver["TIMESTAMP"].astype(str).str.startswith(hoy_dt_pa.strftime("%Y-%m-%d"))]
+            elif filtro_periodo_chat == "Últimos 3 días":
+                limite_str = (hoy_dt_pa - timedelta(days=2)).strftime("%Y-%m-%d")
+                df_ver = df_ver[df_ver["TIMESTAMP"].astype(str).str.slice(0, 10) >= limite_str]
+            elif filtro_periodo_chat == "Últimos 7 días":
+                limite_str = (hoy_dt_pa - timedelta(days=6)).strftime("%Y-%m-%d")
+                df_ver = df_ver[df_ver["TIMESTAMP"].astype(str).str.slice(0, 10) >= limite_str]
+
+            if filtro_prio_chat != "TODOS":
+                df_ver = df_ver[df_ver["PRIORIDAD"].astype(str).str.upper() == filtro_prio_chat]
+
+            if busq_chat:
+                mask_ch = (
+                    df_ver["USUARIO"].astype(str).str.upper().str.contains(busq_chat, na=False, regex=False)
+                    | df_ver["MENSAJE"].astype(str).str.upper().str.contains(busq_chat, na=False, regex=False)
+                )
+                df_ver = df_ver[mask_ch]
+
+            if df_ver.empty:
+                st.info("No hay mensajes que coincidan con el filtro seleccionado.")
+                return
+
+            df_ver = df_ver.tail(100)
+            bloques_html = []
+            for _, row_m in df_ver.iterrows():
+                ts_m = html.escape(str(row_m.get("TIMESTAMP", "")))
+                usr_m = html.escape(str(row_m.get("USUARIO", "")))
+                prio_m = str(row_m.get("PRIORIDAD", "NORMAL")).strip().upper()
+                msg_m = html.escape(str(row_m.get("MENSAJE", ""))).replace("\n", "<br>")
+
+                es_mio = limpiar_valor(row_m.get("USUARIO", "")) == usuario_sesion_chat
+                es_urg = prio_m == "URGENTE"
+
+                if es_urg:
+                    borde = "#ff4b4b"
+                    fondo = "rgba(120, 20, 30, 0.55)"
+                    badge = "<span style='background:#ff4b4b;color:#fff;padding:2px 7px;border-radius:6px;font-size:11px;font-weight:bold;margin-left:6px;'>🚨 URGENTE</span>"
+                elif es_mio:
+                    borde = "#00d4ff"
+                    fondo = "rgba(0, 140, 180, 0.30)"
+                    badge = ""
+                else:
+                    borde = "#3a6ea5"
+                    fondo = "rgba(25, 35, 55, 0.78)"
+                    badge = ""
+
+                margen_lado = "margin-left: 12%;" if es_mio else "margin-right: 12%;"
+                bloques_html.append(
+                    f"<div style='{margen_lado} background:{fondo}; border-left:4px solid {borde}; "
+                    f"border-radius:10px; padding:10px 14px; margin-bottom:10px;'>"
+                    f"<div style='display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;'>"
+                    f"<span style='color:#00ffff; font-weight:bold; font-size:13px;'>👤 {usr_m}{badge}</span>"
+                    f"<span style='color:#b8d8e8; font-size:11px;'>🕒 {ts_m}</span>"
+                    f"</div>"
+                    f"<div style='color:#ffffff; font-size:14px; line-height:1.45;'>{msg_m}</div>"
+                    f"</div>"
+                )
+
+            st.markdown(
+                f"<div style='max-height:420px; overflow-y:auto; padding:12px; "
+                f"background:rgba(5,10,20,0.65); border:1px solid #00d4ff; border-radius:12px;'>"
+                f"{''.join(bloques_html)}</div>",
+                unsafe_allow_html=True,
+            )
+
+        _frag_chat = getattr(st, "fragment", getattr(st, "experimental_fragment", None))
+        if _frag_chat is not None:
+            @_frag_chat(run_every=10)
+            def _panel_chat_en_vivo():
+                _renderizar_historial_chat()
+
+            _panel_chat_en_vivo()
+        else:
+            _renderizar_historial_chat()
+
+        st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
+
+        with st.form("form_enviar_mensaje_chat", clear_on_submit=True):
+            ec1, ec2 = st.columns([1, 4])
+            prio_envio = ec1.selectbox("Prioridad:", ["NORMAL", "URGENTE"], index=0)
+            texto_envio = ec2.text_input(
+                f"Escribe tu mensaje como {usuario_sesion_chat}:",
+                placeholder="Ej.: Confirmado relevo del Grupo B en CON sin novedades...",
+            )
+            btn_enviar_chat = st.form_submit_button("📨 Enviar Mensaje a Todos los Conectados", use_container_width=True)
+
+            if btn_enviar_chat:
+                if not texto_envio.strip():
+                    st.warning("⚠️ Escribe un mensaje antes de enviarlo.")
+                else:
+                    try:
+                        ts_envio = datetime.now(tz_pa).strftime("%Y-%m-%d %H:%M:%S")
+                        enviar_mensaje_chat(
+                            usuario=usuario_sesion_chat,
+                            prioridad=prio_envio,
+                            mensaje=texto_envio,
+                            timestamp_str=ts_envio,
+                        )
+                        st.rerun()
+                    except Exception as e_chat:
+                        st.error(f"❌ Error al enviar el mensaje: {e_chat}")
+
+        st.markdown("</div>", unsafe_allow_html=True)
