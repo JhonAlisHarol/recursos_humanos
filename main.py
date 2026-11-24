@@ -1881,9 +1881,9 @@ else:
                 grps = sorted([g for g in sub_cen["_GRUPO_NORM"].unique() if g != ""])
                 grupos_disponibles = ["TODOS"] + grps
 
-            pd_grupo = p3.selectbox("Grupo de Guardia *", grupos_disponibles, key="pd_grupo_sel")
+            pd_grupo = p3.selectbox("Grupo de Turno *", grupos_disponibles, key="pd_grupo_sel")
             pd_fase_relevo = p4.selectbox(
-                "Fase de Relevo / Guardia:",
+                "Fase de Relevo / Turno:",
                 [
                     "ENTRANTE (DÍA 1 DE TURNO)",
                     "CONTINUIDAD DE TURNO (DÍA INTERMEDIO)",
