@@ -1492,85 +1492,97 @@ else:
             st.warning(f"⚠️ La pestaña **`{pestana_origen_sel}`** no tiene registros disponibles.")
         else:
             filtro_busq_mov = st.text_input(
-                "3. Buscar unidad por Cédula, Nombre, Apellido o Posición:",
+                "3. Ingresa Posición, Cédula, Nombre o Apellido de la unidad a mover (y presiona Enter):",
+                placeholder="Ej.: 28089 o 4-778-277",
                 key="mov_buscar",
             ).strip().upper()
 
-            df_candidatos = df_origen_mov.copy()
-            if filtro_busq_mov:
-                mask_m = (
-                    df_candidatos["CEDULA"].str.upper().str.contains(filtro_busq_mov, na=False)
-                    | df_candidatos["NOMBRE"].str.upper().str.contains(filtro_busq_mov, na=False)
-                    | df_candidatos["APELLIDO"].str.upper().str.contains(filtro_busq_mov, na=False)
-                    | df_candidatos["POSIC"].str.upper().str.contains(filtro_busq_mov, na=False)
+            if not filtro_busq_mov:
+                st.info(
+                    "🔒 Por seguridad no se selecciona ninguna unidad por defecto. "
+                    "Escribe la **Posición, Cédula, Nombre o Apellido** para buscar la unidad exacta que deseas mover."
                 )
-                df_candidatos = df_candidatos[mask_m]
-
-            if df_candidatos.empty:
-                st.info("No se encontraron unidades con ese criterio de búsqueda.")
             else:
-                opciones_indices = list(df_candidatos.index)
-                unidad_idx = st.selectbox(
-                    "4. Selecciona la unidad a mover:",
-                    opciones_indices,
-                    format_func=lambda idx: (
-                        f"{df_origen_mov.loc[idx, 'RANGO']} | POSIC: {df_origen_mov.loc[idx, 'POSIC']} | "
-                        f"{df_origen_mov.loc[idx, 'NOMBRE']} {df_origen_mov.loc[idx, 'APELLIDO']} | "
-                        f"CÉD: {df_origen_mov.loc[idx, 'CEDULA']} | "
-                        f"ESTADO: {df_origen_mov.loc[idx, 'ESTADO_STATUS']}"
-                    ),
-                    key="mov_unidad_sel",
+                mask_m = (
+                    df_origen_mov["CEDULA"].str.upper().str.contains(filtro_busq_mov, na=False, regex=False)
+                    | df_origen_mov["NOMBRE"].str.upper().str.contains(filtro_busq_mov, na=False, regex=False)
+                    | df_origen_mov["APELLIDO"].str.upper().str.contains(filtro_busq_mov, na=False, regex=False)
+                    | df_origen_mov["POSIC"].str.upper().str.contains(filtro_busq_mov, na=False, regex=False)
                 )
+                df_candidatos = df_origen_mov[mask_m]
 
-                fila_sel = df_origen_mov.loc[unidad_idx]
-                st.markdown("**Vista previa de la unidad seleccionada:**")
-                st.dataframe(
-                    pd.DataFrame([fila_sel[["RANGO", "POSIC", "NOMBRE", "APELLIDO", "CEDULA", "ESTAMENTO", "ASIGNADO_CENTRO", "DEPARTAMENTO", "ESTADO_STATUS"]]]),
-                    use_container_width=True,
-                )
-
-                if pestana_destino_sel == PESTANA_JUB_PRES_TRAS:
-                    estados_sugeridos = ["VACACION POR JUBILACION", "JUBILADO", "TRASLADADOS", "PRESTADO", "ASIGNADO"]
+                if df_candidatos.empty:
+                    st.warning("⚠️ No se encontraron unidades con ese criterio en la pestaña de origen seleccionada.")
                 else:
-                    estados_sugeridos = ["ACTIVO", "ASIGNADO", "TRASLADADOS", "PRESTADO", "VACACIONES"]
+                    opciones_indices = [None] + list(df_candidatos.index)
+                    unidad_idx = st.selectbox(
+                        f"4. Confirma y selecciona la unidad exacta a mover ({len(df_candidatos)} coincidencia(s)):",
+                        opciones_indices,
+                        index=0,
+                        format_func=lambda idx: (
+                            "-- Selecciona la unidad exacta a mover --"
+                            if idx is None
+                            else (
+                                f"{df_origen_mov.loc[idx, 'RANGO']} | POSIC: {df_origen_mov.loc[idx, 'POSIC']} | "
+                                f"{df_origen_mov.loc[idx, 'NOMBRE']} {df_origen_mov.loc[idx, 'APELLIDO']} | "
+                                f"CÉD: {df_origen_mov.loc[idx, 'CEDULA']} | "
+                                f"ESTADO: {df_origen_mov.loc[idx, 'ESTADO_STATUS']}"
+                            )
+                        ),
+                        key=f"mov_unidad_sel_{pestana_origen_sel}_{filtro_busq_mov}",
+                    )
 
-                d_col1, d_col2, d_col3 = st.columns(3)
-                estado_nuevo = d_col1.selectbox(
-                    "5. Nuevo ESTADO_STATUS al mover:",
-                    estados_sugeridos,
-                    key="mov_nuevo_estado",
-                )
-                respaldo_doc = d_col2.text_input(
-                    "Resolución / OGD / Respaldo (opcional):",
-                    key="mov_respaldo",
-                )
-                nota_mov = d_col3.text_input(
-                    "Motivo / Observación del movimiento (opcional):",
-                    key="mov_obs",
-                )
+                    if unidad_idx is not None:
+                        fila_sel = df_origen_mov.loc[unidad_idx]
+                        st.markdown("**Vista previa de la unidad seleccionada:**")
+                        st.dataframe(
+                            pd.DataFrame([fila_sel[["RANGO", "POSIC", "NOMBRE", "APELLIDO", "CEDULA", "ESTAMENTO", "ASIGNADO_CENTRO", "DEPARTAMENTO", "ESTADO_STATUS"]]]),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
 
-                if st.button(
-                    f"🔄 Mover a {pestana_destino_sel} y quitar de {pestana_origen_sel}",
-                    use_container_width=True,
-                ):
-                    try:
-                        mover_unidad_entre_pestanas(
-                            pestana_origen=pestana_origen_sel,
-                            pestana_destino=pestana_destino_sel,
-                            indice_df_origen=int(unidad_idx),
-                            nuevo_estado_status=estado_nuevo,
-                            usuario_actual=st.session_state.get("usuario_actual", "ADMINISTRADOR"),
-                            timestamp_str=timestamp_actual,
-                            respaldo_mov=respaldo_doc,
-                            obs_adicional=nota_mov,
+                        if pestana_destino_sel == PESTANA_JUB_PRES_TRAS:
+                            estados_sugeridos = ["VACACION POR JUBILACION", "JUBILADO", "TRASLADADOS", "PRESTADO", "ASIGNADO"]
+                        else:
+                            estados_sugeridos = ["ACTIVO", "ASIGNADO", "TRASLADADOS", "PRESTADO", "VACACIONES"]
+
+                        d_col1, d_col2, d_col3 = st.columns(3)
+                        estado_nuevo = d_col1.selectbox(
+                            "5. Nuevo ESTADO_STATUS al mover:",
+                            estados_sugeridos,
+                            key="mov_nuevo_estado",
                         )
-                        st.success(
-                            f"✔️ Unidad **{fila_sel['NOMBRE']} {fila_sel['APELLIDO']}** (Cédula: `{fila_sel['CEDULA']}`) "
-                            f"movida de **`{pestana_origen_sel}`** a **`{pestana_destino_sel}`** con estado **`{estado_nuevo}`**."
+                        respaldo_doc = d_col2.text_input(
+                            "Resolución / OGD / Respaldo (opcional):",
+                            key="mov_respaldo",
                         )
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Error al mover la unidad: {e}")
+                        nota_mov = d_col3.text_input(
+                            "Motivo / Observación del movimiento (opcional):",
+                            key="mov_obs",
+                        )
+
+                        if st.button(
+                            f"🔄 Mover a {pestana_destino_sel} y quitar de {pestana_origen_sel}",
+                            use_container_width=True,
+                        ):
+                            try:
+                                mover_unidad_entre_pestanas(
+                                    pestana_origen=pestana_origen_sel,
+                                    pestana_destino=pestana_destino_sel,
+                                    indice_df_origen=int(unidad_idx),
+                                    nuevo_estado_status=estado_nuevo,
+                                    usuario_actual=st.session_state.get("usuario_actual", "ADMINISTRADOR"),
+                                    timestamp_str=timestamp_actual,
+                                    respaldo_mov=respaldo_doc,
+                                    obs_adicional=nota_mov,
+                                )
+                                st.success(
+                                    f"✔️ Unidad **{fila_sel['NOMBRE']} {fila_sel['APELLIDO']}** (Cédula: `{fila_sel['CEDULA']}`) "
+                                    f"movida de **`{pestana_origen_sel}`** a **`{pestana_destino_sel}`** con estado **`{estado_nuevo}`**."
+                                )
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Error al mover la unidad: {e}")
 
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1616,29 +1628,137 @@ else:
                 st.markdown("</div>", unsafe_allow_html=True)
                 st.write("")
 
-        with st.form("form_novedad_gerencial", clear_on_submit=True):
-            st.markdown("<h3 style='color: #00d4ff;'>1. Identificación de la Unidad</h3>", unsafe_allow_html=True)
+        # --- BUSCADOR PARA AUTORRELLENAR DESDE LA BASE DE DATOS POR POSICIÓN O CÉDULA ---
+        def _opciones_y_indice_nov(lista_base, valor_raw, mapa_norm=None):
+            val = limpiar_valor(valor_raw)
+            if not val:
+                return list(lista_base), 0
+            if mapa_norm:
+                val = mapa_norm.get(val, val)
+            for i_opt, opt in enumerate(lista_base):
+                if limpiar_valor(opt) == val:
+                    return list(lista_base), i_opt
+            lista_ext = [lista_base[0], val] + list(lista_base[1:])
+            return lista_ext, 1
+
+        st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+        st.markdown(
+            "<h3 style='color: #00ffff; margin-top: 0;'>🔎 Buscar Unidad por Posición o Cédula (Autocompletar)</h3>",
+            unsafe_allow_html=True,
+        )
+        busq_nov_auto = st.text_input(
+            "Ingresa la POSICIÓN o CÉDULA de la unidad y presiona Enter para cargar sus datos automáticamente:",
+            placeholder="Ej.: 28089 o 4-778-277",
+            key="nov_auto_buscar",
+        ).strip().upper()
+
+        unidad_auto = None
+        id_match_nov = "manual"
+
+        if busq_nov_auto:
+            frames_busq = []
+            for p_src in (PESTANA_PERSONAL, PESTANA_AGREGADAS, PESTANA_JUB_PRES_TRAS):
+                df_tmp = leer_pestana_df(p_src, COLUMNAS_OFICIALES)
+                if not df_tmp.empty:
+                    df_tmp = df_tmp.copy()
+                    df_tmp["_ORIGEN_HOJA"] = p_src
+                    frames_busq.append(df_tmp)
+
+            if frames_busq:
+                df_busq_all = pd.concat(frames_busq, ignore_index=True)
+                pos_norm = df_busq_all["POSIC"].apply(limpiar_valor)
+                ced_norm = df_busq_all["CEDULA"].apply(limpiar_valor)
+
+                # Priorizar coincidencia exacta; si no existe, buscar coincidencia parcial
+                df_hits = df_busq_all[(pos_norm == busq_nov_auto) | (ced_norm == busq_nov_auto)]
+                if df_hits.empty:
+                    df_hits = df_busq_all[
+                        pos_norm.str.contains(busq_nov_auto, na=False, regex=False)
+                        | ced_norm.str.contains(busq_nov_auto, na=False, regex=False)
+                    ]
+
+                if df_hits.empty:
+                    st.warning(
+                        f"⚠️ No se encontró ninguna unidad con Posición o Cédula `{busq_nov_auto}` en la base de datos. "
+                        "Puedes ingresar los datos manualmente en el formulario."
+                    )
+                elif len(df_hits) == 1:
+                    idx_h = df_hits.index[0]
+                    unidad_auto = df_hits.loc[idx_h]
+                    id_match_nov = f"{unidad_auto.get('_ORIGEN_HOJA', '')}_{limpiar_valor(unidad_auto.get('CEDULA', ''))}_{limpiar_valor(unidad_auto.get('POSIC', ''))}"
+                    st.success(
+                        f"✅ Datos cargados automáticamente desde **`{unidad_auto['_ORIGEN_HOJA']}`**: "
+                        f"**{unidad_auto.get('RANGO', '')} {unidad_auto.get('NOMBRE', '')} {unidad_auto.get('APELLIDO', '')}** "
+                        f"(Posic: `{unidad_auto.get('POSIC', '')}` · Céd: `{unidad_auto.get('CEDULA', '')}`). "
+                        "Completa abajo los datos de la novedad."
+                    )
+                else:
+                    idx_h = st.selectbox(
+                        f"Se encontraron {len(df_hits)} coincidencias, elige la unidad:",
+                        list(df_hits.index),
+                        format_func=lambda i: (
+                            f"[{df_hits.loc[i, '_ORIGEN_HOJA']}] {df_hits.loc[i, 'RANGO']} | "
+                            f"POSIC: {df_hits.loc[i, 'POSIC']} | {df_hits.loc[i, 'NOMBRE']} {df_hits.loc[i, 'APELLIDO']} | "
+                            f"CÉD: {df_hits.loc[i, 'CEDULA']}"
+                        ),
+                        key=f"nov_auto_pick_{busq_nov_auto}",
+                    )
+                    unidad_auto = df_hits.loc[idx_h]
+                    id_match_nov = f"{unidad_auto.get('_ORIGEN_HOJA', '')}_{limpiar_valor(unidad_auto.get('CEDULA', ''))}_{limpiar_valor(unidad_auto.get('POSIC', ''))}"
+                    st.success(
+                        f"✅ Datos cargados desde **`{unidad_auto['_ORIGEN_HOJA']}`**: "
+                        f"**{unidad_auto.get('RANGO', '')} {unidad_auto.get('NOMBRE', '')} {unidad_auto.get('APELLIDO', '')}**."
+                    )
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.write("")
+
+        mapa_est_nov = {
+            "P.N": "P.N", "P.N.": "P.N", "PN": "P.N", "PNP": "P.N",
+            "M.N.J": "MNJ", "M.N.J.": "MNJ", "MNJ": "MNJ",
+            "SENAN": "SENAN", "SENAFRONT": "SENAFRONT", "MINSEG": "MINSEG",
+        }
+
+        val_rango_u = unidad_auto.get("RANGO", "") if unidad_auto is not None else ""
+        val_posic_u = limpiar_valor(unidad_auto.get("POSIC", "")) if unidad_auto is not None else ""
+        val_nombre_u = limpiar_valor(unidad_auto.get("NOMBRE", "")) if unidad_auto is not None else ""
+        val_apellido_u = limpiar_valor(unidad_auto.get("APELLIDO", "")) if unidad_auto is not None else ""
+        val_cedula_u = limpiar_valor(unidad_auto.get("CEDULA", "")) if unidad_auto is not None else ""
+        val_est_u = unidad_auto.get("ESTAMENTO", "") if unidad_auto is not None else ""
+        val_centro_u = unidad_auto.get("ASIGNADO_CENTRO", "") if unidad_auto is not None else ""
+        val_depto_u = unidad_auto.get("DEPARTAMENTO", "") if unidad_auto is not None else ""
+        val_turno_u = unidad_auto.get("TURNO", "") if unidad_auto is not None else ""
+        val_grupo_u = limpiar_valor(unidad_auto.get("GRUPO", "")) if unidad_auto is not None else ""
+        val_funcion_u = limpiar_valor(unidad_auto.get("FUNCION", "")) if unidad_auto is not None else ""
+
+        opts_rango_n, idx_rango_n = _opciones_y_indice_nov(lista_rangos, val_rango_u, DASH_MAPA_RANGOS)
+        opts_est_n, idx_est_n = _opciones_y_indice_nov(lista_estamentos, val_est_u, mapa_est_nov)
+        opts_cen_n, idx_cen_n = _opciones_y_indice_nov(lista_centros, val_centro_u, DASH_MAPA_CENTROS)
+        opts_dep_n, idx_dep_n = _opciones_y_indice_nov(lista_departamentos, val_depto_u)
+        opts_tur_n, idx_tur_n = _opciones_y_indice_nov(lista_turnos, val_turno_u)
+
+        with st.form(f"form_novedad_gerencial_{id_match_nov}", clear_on_submit=True):
+            st.markdown("<h3 style='color: #00d4ff;'>1. Identificación de la Unidad (Autorrellenable desde BD)</h3>", unsafe_allow_html=True)
             n1, n2, n3, n4, n5, n6 = st.columns(6)
-            nov_rango = n1.selectbox("RANGO *", lista_rangos)
-            nov_posic = n2.text_input("POSIC")
-            nov_nombre = n3.text_input("NOMBRE *")
-            nov_apellido = n4.text_input("APELLIDO *")
-            nov_cedula = n5.text_input("CÉDULA *")
-            nov_estamento = n6.selectbox("ESTAMENTO", lista_estamentos)
+            nov_rango = n1.selectbox("RANGO *", opts_rango_n, index=idx_rango_n)
+            nov_posic = n2.text_input("POSIC", value=val_posic_u)
+            nov_nombre = n3.text_input("NOMBRE *", value=val_nombre_u)
+            nov_apellido = n4.text_input("APELLIDO *", value=val_apellido_u)
+            nov_cedula = n5.text_input("CÉDULA *", value=val_cedula_u)
+            nov_estamento = n6.selectbox("ESTAMENTO", opts_est_n, index=idx_est_n)
 
             st.markdown("<h3 style='color: #00d4ff;'>2. Ubicación Operativa y Cobertura</h3>", unsafe_allow_html=True)
             u1, u2, u3, u4, u5, u6 = st.columns(6)
-            nov_centro = u1.selectbox("ASIGNADO_CENTRO", lista_centros)
-            nov_depto = u2.selectbox("DEPARTAMENTO", lista_departamentos)
-            nov_turno = u3.selectbox("TURNO", lista_turnos)
-            nov_grupo = u4.text_input("GRUPO")
-            nov_funcion = u5.text_input("FUNCIÓN")
+            nov_centro = u1.selectbox("ASIGNADO_CENTRO", opts_cen_n, index=idx_cen_n)
+            nov_depto = u2.selectbox("DEPARTAMENTO", opts_dep_n, index=idx_dep_n)
+            nov_turno = u3.selectbox("TURNO", opts_tur_n, index=idx_tur_n)
+            nov_grupo = u4.text_input("GRUPO", value=val_grupo_u)
+            nov_funcion = u5.text_input("FUNCIÓN", value=val_funcion_u)
             nov_impacto = u6.selectbox(
                 "IMPACTO_OPERATIVO",
                 ["SIN AFECTACIÓN", "CUBIERTO POR GRUPO", "REQUIERE RELEVO", "CRÍTICO EN TURNO"],
             )
 
-            st.markdown("<h3 style='color: #00d4ff;'>3. Detalle de Novedad y Respaldo Documental</h3>", unsafe_allow_html=True)
+            st.markdown("<h3 style='color: #00d4ff;'>3. Detalle de Novedad y Respaldo Documental (Ingreso Manual)</h3>", unsafe_allow_html=True)
             d1, d2, d3, d4, d5 = st.columns(5)
             nov_tipo = d1.selectbox("TIPO_NOVEDAD *", ["PERMISO", "INCAPACIDAD", "LICENCIA"])
             nov_subtipo = d2.text_input("SUBTIPO_MOTIVO *")
