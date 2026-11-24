@@ -993,9 +993,9 @@ else:
     ]
     lista_turnos = ["SELECCIONAR", "4X4", "5X2", "7X7", "20X20", "24X24", "ROTATIVO", "ADMINISTRATIVO"]
     lista_turnos_parte = [
-        "DIURNO (07:00-19:00)",
-        "NOCTURNO (19:00-07:00)",
-        "ADMINISTRATIVO (5X2)",
+        "DIURNO (06:00-18:00)",
+        "NOCTURNO (18:00-06:00)",
+        "ADMINISTRATIVO (08:00-16:00)",
     ]
     lista_motivos_falta = [
         "N/A", "PERMISO", "INCAPACITADO", "LICENCIA", "COMISIÓN",
