@@ -934,7 +934,7 @@ def calcular_alerta_reintegro(fecha_inicio, fecha_fin, estado_tramite, hoy):
 def buscar_novedad_activa_unidad(df_nov, cedula, posic, fecha_eval):
     """
     Cruza en tiempo real una unidad contra Permiso,incapacidad,licencia para saber
-    si tiene un permiso, incapacidad o licencia VIGENTE/PRORROGADO en `fecha_eval`.
+    si tiene un permiso, incapacidad, licencia o vacaciones VIGENTE/PRORROGADO en `fecha_eval`.
     """
     if df_nov.empty:
         return None
@@ -953,14 +953,24 @@ def buscar_novedad_activa_unidad(df_nov, cedula, posic, fecha_eval):
         f_fin = parsear_fecha_simple(row_n.get("FECHA_FIN", ""))
         if f_ini and f_fin and f_ini <= fecha_eval <= f_fin:
             tipo_n = limpiar_valor(row_n.get("TIPO_NOVEDAD", "PERMISO"))
+            subtipo_n = limpiar_valor(row_n.get("SUBTIPO_MOTIVO", ""))
             motivo_map = {
                 "INCAPACIDAD": "INCAPACITADO",
                 "PERMISO": "PERMISO",
                 "LICENCIA": "LICENCIA",
             }
+            if tipo_n == "VACACIONES":
+                if "PENDIENTE" in subtipo_n:
+                    motivo_res = "VAC. PENDIENTES"
+                elif "PRESCRI" in subtipo_n or "MEDICA" in subtipo_n or "MÉDICA" in subtipo_n:
+                    motivo_res = "VAC. X PRESCRI. MÉDICA"
+                else:
+                    motivo_res = "VAC. NORMALES"
+            else:
+                motivo_res = motivo_map.get(tipo_n, tipo_n or "PERMISO")
             return {
-                "motivo_falta": motivo_map.get(tipo_n, tipo_n or "PERMISO"),
-                "tipo_cruce": f"{tipo_n} VIGENTE ({limpiar_valor(row_n.get('SUBTIPO_MOTIVO', ''))})".strip(),
+                "motivo_falta": motivo_res,
+                "tipo_cruce": f"{tipo_n} VIGENTE ({subtipo_n})".strip(),
                 "doc": limpiar_valor(row_n.get("NUM_DOCUMENTO_RESPALDO", "")),
                 "obs": f"CRUZADO AUTOMÁTICAMENTE CON {limpiar_valor(row_n.get('ID_NOVEDAD', ''))}",
             }
@@ -1042,6 +1052,11 @@ else:
         "ATENCIÓN MÉDICA", "HOSPITALIZADO", "VAC. NORMALES",
         "VAC. PENDIENTES", "VAC. X PRESCRI. MÉDICA",
     ]
+    lista_subtipos_vacaciones = [
+        "VAC. NORMALES",
+        "VAC. PENDIENTES",
+        "VAC. X PRESCRI. MÉDICA",
+    ]
     lista_sangre = ["SELECCIONAR", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
     lista_provincias = [
         "SELECCIONAR", "PANAMÁ", "PANAMÁ OESTE", "COLÓN", "CHIRIQUÍ", "VERAGUAS",
@@ -1088,7 +1103,7 @@ else:
                 "📈 Dashboard Ejecutivo",
                 "➕ Registro Individual",
                 "🔄 Movimiento de Unidades",
-                "🩺 Permisos, Incapacidades y Licencias",
+                "🩺 Permisos, Incapacidades, Licencias y Vacaciones",
                 "📋 Parte Diario de Personal",
                 "📊 Consulta de Bases de Datos",
                 "💬 Chat Institucional",
@@ -1644,13 +1659,20 @@ else:
         st.markdown("</div>", unsafe_allow_html=True)
 
     # ==========================================
-    # MÓDULO 3: PERMISOS, INCAPACIDADES Y LICENCIAS (AUTOMATIZADO CON ALERTAS)
+    # MÓDULO 3: PERMISOS, INCAPACIDADES, LICENCIAS Y VACACIONES (AUTOMATIZADO CON ALERTAS)
     # ==========================================
-    elif modulo_activo == "🩺 Permisos, Incapacidades y Licencias":
+    elif modulo_activo == "🩺 Permisos, Incapacidades, Licencias y Vacaciones":
         st.markdown(
-            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>🩺 CONTROL DE PERMISOS, INCAPACIDADES Y LICENCIAS</h1>",
+            "<h1 style='color: #00d4ff; text-shadow: 0 0 12px #00d4ff;'>🩺 CONTROL DE PERMISOS, INCAPACIDADES, LICENCIAS Y VACACIONES</h1>",
             unsafe_allow_html=True,
         )
+
+        if "nov_form_reset" not in st.session_state:
+            st.session_state.nov_form_reset = 0
+        nov_reset_n = st.session_state.nov_form_reset
+
+        if st.session_state.get("nov_msg_ok"):
+            st.success(st.session_state.pop("nov_msg_ok"))
 
         df_nov_live = leer_pestana_df(PESTANA_NOVEDADES, COLUMNAS_NOVEDADES)
         if not df_nov_live.empty:
@@ -1706,7 +1728,7 @@ else:
         busq_nov_auto = st.text_input(
             "Ingresa la POSICIÓN o CÉDULA de la unidad y presiona Enter para cargar sus datos automáticamente:",
             placeholder="Ej.: 28089 o 4-778-277",
-            key="nov_auto_buscar",
+            key=f"nov_auto_buscar_{nov_reset_n}",
         ).strip().upper()
 
         unidad_auto = None
@@ -1758,7 +1780,7 @@ else:
                             f"POSIC: {df_hits.loc[i, 'POSIC']} | {df_hits.loc[i, 'NOMBRE']} {df_hits.loc[i, 'APELLIDO']} | "
                             f"CÉD: {df_hits.loc[i, 'CEDULA']}"
                         ),
-                        key=f"nov_auto_pick_{busq_nov_auto}",
+                        key=f"nov_auto_pick_{busq_nov_auto}_{nov_reset_n}",
                     )
                     unidad_auto = df_hits.loc[idx_h]
                     id_match_nov = f"{unidad_auto.get('_ORIGEN_HOJA', '')}_{limpiar_valor(unidad_auto.get('CEDULA', ''))}_{limpiar_valor(unidad_auto.get('POSIC', ''))}"
@@ -1793,96 +1815,128 @@ else:
         opts_dep_n, idx_dep_n = _opciones_y_indice_nov(lista_departamentos, val_depto_u)
         opts_tur_n, idx_tur_n = _opciones_y_indice_nov(lista_turnos, val_turno_u)
 
-        with st.form(f"form_novedad_gerencial_{id_match_nov}", clear_on_submit=True):
-            st.markdown("<h3 style='color: #00d4ff;'>1. Identificación de la Unidad (Autorrellenable desde BD)</h3>", unsafe_allow_html=True)
-            n1, n2, n3, n4, n5, n6 = st.columns(6)
-            nov_rango = n1.selectbox("RANGO *", opts_rango_n, index=idx_rango_n)
-            nov_posic = n2.text_input("POSIC", value=val_posic_u)
-            nov_nombre = n3.text_input("NOMBRE *", value=val_nombre_u)
-            nov_apellido = n4.text_input("APELLIDO *", value=val_apellido_u)
-            nov_cedula = n5.text_input("CÉDULA *", value=val_cedula_u)
-            nov_estamento = n6.selectbox("ESTAMENTO", opts_est_n, index=idx_est_n)
+        k_u = f"{id_match_nov}_{nov_reset_n}"
 
-            st.markdown("<h3 style='color: #00d4ff;'>2. Ubicación Operativa y Cobertura</h3>", unsafe_allow_html=True)
-            u1, u2, u3, u4, u5, u6 = st.columns(6)
-            nov_centro = u1.selectbox("ASIGNADO_CENTRO", opts_cen_n, index=idx_cen_n)
-            nov_depto = u2.selectbox("DEPARTAMENTO", opts_dep_n, index=idx_dep_n)
-            nov_turno = u3.selectbox("TURNO", opts_tur_n, index=idx_tur_n)
-            nov_grupo = u4.text_input("GRUPO", value=val_grupo_u)
-            nov_funcion = u5.text_input("FUNCIÓN", value=val_funcion_u)
-            nov_impacto = u6.selectbox(
-                "IMPACTO_OPERATIVO",
-                ["SIN AFECTACIÓN", "CUBIERTO POR GRUPO", "REQUIERE RELEVO", "CRÍTICO EN TURNO"],
+        st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+        st.markdown("<h3 style='color: #00d4ff;'>1. Identificación de la Unidad (Autorrellenable desde BD)</h3>", unsafe_allow_html=True)
+        n1, n2, n3, n4, n5, n6 = st.columns(6)
+        nov_rango = n1.selectbox("RANGO *", opts_rango_n, index=idx_rango_n, key=f"nov_rango_{k_u}")
+        nov_posic = n2.text_input("POSIC", value=val_posic_u, key=f"nov_posic_{k_u}")
+        nov_nombre = n3.text_input("NOMBRE *", value=val_nombre_u, key=f"nov_nombre_{k_u}")
+        nov_apellido = n4.text_input("APELLIDO *", value=val_apellido_u, key=f"nov_apellido_{k_u}")
+        nov_cedula = n5.text_input("CÉDULA *", value=val_cedula_u, key=f"nov_cedula_{k_u}")
+        nov_estamento = n6.selectbox("ESTAMENTO", opts_est_n, index=idx_est_n, key=f"nov_estamento_{k_u}")
+
+        st.markdown("<h3 style='color: #00d4ff;'>2. Ubicación Operativa y Cobertura</h3>", unsafe_allow_html=True)
+        u1, u2, u3, u4, u5, u6 = st.columns(6)
+        nov_centro = u1.selectbox("ASIGNADO_CENTRO", opts_cen_n, index=idx_cen_n, key=f"nov_centro_{k_u}")
+        nov_depto = u2.selectbox("DEPARTAMENTO", opts_dep_n, index=idx_dep_n, key=f"nov_depto_{k_u}")
+        nov_turno = u3.selectbox("TURNO", opts_tur_n, index=idx_tur_n, key=f"nov_turno_{k_u}")
+        nov_grupo = u4.text_input("GRUPO", value=val_grupo_u, key=f"nov_grupo_{k_u}")
+        nov_funcion = u5.text_input("FUNCIÓN", value=val_funcion_u, key=f"nov_funcion_{k_u}")
+        nov_impacto = u6.selectbox(
+            "IMPACTO_OPERATIVO",
+            ["SIN AFECTACIÓN", "CUBIERTO POR GRUPO", "REQUIERE RELEVO", "CRÍTICO EN TURNO"],
+            key=f"nov_impacto_{nov_reset_n}",
+        )
+
+        st.markdown("<h3 style='color: #00d4ff;'>3. Detalle de Novedad y Respaldo Documental (Ingreso Manual)</h3>", unsafe_allow_html=True)
+        d1, d2, d3, d4, d5 = st.columns(5)
+        nov_tipo = d1.selectbox(
+            "TIPO_NOVEDAD *",
+            ["PERMISO", "INCAPACIDAD", "LICENCIA", "VACACIONES"],
+            key=f"nov_tipo_{nov_reset_n}",
+        )
+        if nov_tipo == "VACACIONES":
+            nov_subtipo = d2.selectbox(
+                "SUBTIPO_MOTIVO *",
+                lista_subtipos_vacaciones,
+                key=f"nov_subtipo_vac_{nov_reset_n}",
             )
+        else:
+            nov_subtipo = d2.text_input(
+                "SUBTIPO_MOTIVO *",
+                key=f"nov_subtipo_txt_{nov_reset_n}",
+            )
+        nov_f_inicio = d3.date_input("FECHA_INICIO *", value=hoy_pa, key=f"nov_fini_{nov_reset_n}")
+        nov_f_fin = d4.date_input("FECHA_FIN *", value=hoy_pa, key=f"nov_ffin_{nov_reset_n}")
+        nov_estado = d5.selectbox(
+            "ESTADO_TRAMITE",
+            ["VIGENTE", "FINALIZADO", "PRORROGADO", "ANULADO"],
+            key=f"nov_estado_{nov_reset_n}",
+        )
 
-            st.markdown("<h3 style='color: #00d4ff;'>3. Detalle de Novedad y Respaldo Documental (Ingreso Manual)</h3>", unsafe_allow_html=True)
-            d1, d2, d3, d4, d5 = st.columns(5)
-            nov_tipo = d1.selectbox("TIPO_NOVEDAD *", ["PERMISO", "INCAPACIDAD", "LICENCIA"])
-            nov_subtipo = d2.text_input("SUBTIPO_MOTIVO *")
-            nov_f_inicio = d3.date_input("FECHA_INICIO *", value=hoy_pa)
-            nov_f_fin = d4.date_input("FECHA_FIN *", value=hoy_pa)
-            nov_estado = d5.selectbox("ESTADO_TRAMITE", ["VIGENTE", "FINALIZADO", "PRORROGADO", "ANULADO"])
+        r1, r2, r3, r4 = st.columns(4)
+        nov_doc = r1.text_input("NUM_DOCUMENTO_RESPALDO", key=f"nov_doc_{nov_reset_n}")
+        nov_entidad = r2.text_input("ENTIDAD_EMISORA", key=f"nov_entidad_{nov_reset_n}")
+        nov_autorizado = r3.text_input("AUTORIZADO_POR", key=f"nov_autorizado_{nov_reset_n}")
+        nov_obs = r4.text_input("OBSERVACION", key=f"nov_obs_{nov_reset_n}")
 
-            r1, r2, r3, r4 = st.columns(4)
-            nov_doc = r1.text_input("NUM_DOCUMENTO_RESPALDO")
-            nov_entidad = r2.text_input("ENTIDAD_EMISORA")
-            nov_autorizado = r3.text_input("AUTORIZADO_POR")
-            nov_obs = r4.text_input("OBSERVACION")
+        guardar_nov = st.button(
+            "💾 Registrar en Permiso,incapacidad,licencia",
+            use_container_width=True,
+            key=f"btn_guardar_nov_{nov_reset_n}",
+        )
 
-            guardar_nov = st.form_submit_button("💾 Registrar en Permiso,incapacidad,licencia", use_container_width=True)
+        if guardar_nov:
+            if not nov_nombre.strip() or not nov_apellido.strip() or not nov_cedula.strip() or nov_rango == "SELECCIONAR":
+                st.error("❌ Complete los campos obligatorios: Rango, Nombre, Apellido y Cédula.")
+            elif nov_f_fin < nov_f_inicio:
+                st.error("❌ La FECHA_FIN no puede ser anterior a la FECHA_INICIO.")
+            else:
+                try:
+                    ws_nov = obtener_o_crear_worksheet(PESTANA_NOVEDADES, COLUMNAS_NOVEDADES)
+                    filas_existentes = len(ws_nov.get_all_values())
+                    fila_destino_nov = filas_existentes + 1
+                    correlativo = max(1, filas_existentes)
+                    id_nov = f"NOV-{hoy_pa.year}-{correlativo:03d}"
 
-            if guardar_nov:
-                if not nov_nombre.strip() or not nov_apellido.strip() or not nov_cedula.strip() or nov_rango == "SELECCIONAR":
-                    st.error("❌ Complete los campos obligatorios: Rango, Nombre, Apellido y Cédula.")
-                elif nov_f_fin < nov_f_inicio:
-                    st.error("❌ La FECHA_FIN no puede ser anterior a la FECHA_INICIO.")
-                else:
-                    try:
-                        ws_nov = obtener_o_crear_worksheet(PESTANA_NOVEDADES, COLUMNAS_NOVEDADES)
-                        filas_existentes = len(ws_nov.get_all_values())
-                        fila_destino_nov = filas_existentes + 1
-                        correlativo = max(1, filas_existentes)
-                        id_nov = f"NOV-{hoy_pa.year}-{correlativo:03d}"
+                    f_tot_nov, f_rest_nov, f_alerta_nov = formulas_fila_novedad(fila_destino_nov)
+                    alerta_live = calcular_alerta_reintegro(nov_f_inicio, nov_f_fin, nov_estado, hoy_pa)
+                    usuario_reg = st.session_state.get("usuario_actual", "ADMINISTRADOR")
 
-                        f_tot_nov, f_rest_nov, f_alerta_nov = formulas_fila_novedad(fila_destino_nov)
-                        alerta_live = calcular_alerta_reintegro(nov_f_inicio, nov_f_fin, nov_estado, hoy_pa)
-                        usuario_reg = st.session_state.get("usuario_actual", "ADMINISTRADOR")
+                    fila_nov = [
+                        id_nov,
+                        timestamp_actual,
+                        limpiar_valor(usuario_reg),
+                        limpiar_valor(nov_rango),
+                        limpiar_valor(nov_posic),
+                        limpiar_valor(nov_nombre),
+                        limpiar_valor(nov_apellido),
+                        limpiar_valor(nov_cedula),
+                        limpiar_valor(nov_estamento),
+                        limpiar_valor(nov_centro),
+                        limpiar_valor(nov_depto),
+                        limpiar_valor(nov_turno),
+                        limpiar_valor(nov_grupo),
+                        limpiar_valor(nov_funcion),
+                        limpiar_valor(nov_impacto),
+                        limpiar_valor(nov_tipo),
+                        limpiar_valor(nov_subtipo),
+                        str(nov_f_inicio),
+                        str(nov_f_fin),
+                        f_tot_nov,
+                        f_rest_nov,
+                        limpiar_valor(nov_estado),
+                        f_alerta_nov,
+                        limpiar_valor(nov_doc),
+                        limpiar_valor(nov_entidad),
+                        limpiar_valor(nov_autorizado),
+                        limpiar_valor(nov_obs),
+                    ]
 
-                        fila_nov = [
-                            id_nov,
-                            timestamp_actual,
-                            limpiar_valor(usuario_reg),
-                            limpiar_valor(nov_rango),
-                            limpiar_valor(nov_posic),
-                            limpiar_valor(nov_nombre),
-                            limpiar_valor(nov_apellido),
-                            limpiar_valor(nov_cedula),
-                            limpiar_valor(nov_estamento),
-                            limpiar_valor(nov_centro),
-                            limpiar_valor(nov_depto),
-                            limpiar_valor(nov_turno),
-                            limpiar_valor(nov_grupo),
-                            limpiar_valor(nov_funcion),
-                            limpiar_valor(nov_impacto),
-                            limpiar_valor(nov_tipo),
-                            limpiar_valor(nov_subtipo),
-                            str(nov_f_inicio),
-                            str(nov_f_fin),
-                            f_tot_nov,
-                            f_rest_nov,
-                            limpiar_valor(nov_estado),
-                            f_alerta_nov,
-                            limpiar_valor(nov_doc),
-                            limpiar_valor(nov_entidad),
-                            limpiar_valor(nov_autorizado),
-                            limpiar_valor(nov_obs),
-                        ]
+                    ws_nov.append_row(fila_nov, value_input_option="USER_ENTERED")
+                    leer_pestana_df.clear()
+                    st.session_state.nov_msg_ok = (
+                        f"✔️ Registro **{id_nov}** ({limpiar_valor(nov_tipo)} · {limpiar_valor(nov_subtipo)}) "
+                        f"guardado en **`{PESTANA_NOVEDADES}`**. Estado automático: **{alerta_live}**"
+                    )
+                    st.session_state.nov_form_reset += 1
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error al guardar en `{PESTANA_NOVEDADES}`: {e}")
 
-                        ws_nov.append_row(fila_nov, value_input_option="USER_ENTERED")
-                        leer_pestana_df.clear()
-                        st.success(f"✔️ Registro **{id_nov}** ({limpiar_valor(nov_tipo)}) guardado en **`{PESTANA_NOVEDADES}`**. Estado automático: **{alerta_live}**")
-                    except Exception as e:
-                        st.error(f"❌ Error al guardar en `{PESTANA_NOVEDADES}`: {e}")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # ==========================================
     # MÓDULO 4: PARTE DIARIO DE PERSONAL (MOTOR HÍBRIDO DE GUARDIA Y RELEVO)
@@ -2042,7 +2096,7 @@ else:
                     n_cruzados = int((df_ed_base["ASISTENCIA_TURNO"] == "FALTO").sum())
                     st.markdown(
                         f"**Unidades cargadas para {pd_centro} ({pd_grupo}):** `{len(df_ed_base)}` unidades · "
-                        f"**Faltos detectados automáticamente por Permiso/Incapacidad vigente:** `{n_cruzados}`"
+                        f"**Faltos detectados automáticamente por Permiso/Incapacidad/Vacaciones vigente:** `{n_cruzados}`"
                     )
 
                     editor_key = f"ed_parte_{pd_centro}_{pd_grupo}_{pd_fecha_ini}"
@@ -2433,7 +2487,7 @@ else:
 
         tab_bd_personal, tab_bd_novedades = st.tabs([
             "🗂️ 1. BASE DE DATOS DE PERSONAL (3 PESTAÑAS)",
-            "🩺 2. PERMISOS, INCAPACIDADES Y LICENCIAS",
+            "🩺 2. PERMISOS, INCAPACIDADES, LICENCIAS Y VACACIONES",
         ])
 
         with tab_bd_personal:
@@ -2841,7 +2895,7 @@ else:
             if df_nov.empty:
                 st.info(
                     f"La pestaña **`{PESTANA_NOVEDADES}`** aún no tiene registros cargados. "
-                    "Puedes agregarlos desde el módulo **🩺 Permisos, Incapacidades y Licencias**."
+                    "Puedes agregarlos desde el módulo **🩺 Permisos, Incapacidades, Licencias y Vacaciones**."
                 )
             else:
                 fn1, fn2, fn3, fn4 = st.columns([2, 1, 1, 1])
