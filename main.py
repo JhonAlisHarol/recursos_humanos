@@ -2266,6 +2266,18 @@ else:
                 "📋 Vac.Jubilacion_U.Prestados_U.Trasladados",
             ])
 
+            COLS_RESUMEN_EJECUTIVO = [
+                "RANGO", "POSIC", "NOMBRE", "APELLIDO", "CEDULA", "ESTAMENTO",
+                "ASIGNADO_CENTRO", "DEPARTAMENTO", "TURNO", "GRUPO",
+                "ESTADO_STATUS", "OPERAT_NO_OPERAT", "APTO_NO_APTO", "ANOS_SERVICIOS",
+            ]
+
+            def _opciones_filtro(df_src, col_n):
+                if col_n not in df_src.columns:
+                    return ["TODOS"]
+                vals = sorted({str(x).strip() for x in df_src[col_n].dropna().unique() if str(x).strip() != ""})
+                return ["TODOS"] + vals
+
             def renderizar_visor_y_editor_personal(nombre_hoja, key_prefix):
                 df_p = leer_pestana_df(nombre_hoja, COLUMNAS_OFICIALES)
                 if df_p.empty:
@@ -2273,21 +2285,69 @@ else:
                     return
 
                 st.markdown('<div class="neon-card">', unsafe_allow_html=True)
+
+                # Fila 1: Buscador + filtros institucionales básicos
                 f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
                 busqueda = f1.text_input(
                     "🔎 Buscar por Nombre, Apellido, Posición o Cédula (presiona Enter para editar):",
                     key=f"{key_prefix}_busq",
                 ).strip().upper()
+                filtro_est = f2.selectbox("Estamento:", _opciones_filtro(df_p, "ESTAMENTO"), key=f"{key_prefix}_est")
+                filtro_cen = f3.selectbox("Centro:", _opciones_filtro(df_p, "ASIGNADO_CENTRO"), key=f"{key_prefix}_cen")
+                filtro_sta = f4.selectbox("Estado / Status:", _opciones_filtro(df_p, "ESTADO_STATUS"), key=f"{key_prefix}_sta")
 
-                ests_disp = ["TODOS"] + sorted([x for x in df_p["ESTAMENTO"].unique() if str(x).strip() != ""])
-                filtro_est = f2.selectbox("Estamento:", ests_disp, key=f"{key_prefix}_est")
+                # Fila 2: Filtros operativos principales (los más solicitados por jefatura)
+                o1, o2, o3, o4, o5 = st.columns(5)
+                filtro_op = o1.selectbox("Operatividad:", _opciones_filtro(df_p, "OPERAT_NO_OPERAT"), key=f"{key_prefix}_op")
+                filtro_dep = o2.selectbox("Departamento:", _opciones_filtro(df_p, "DEPARTAMENTO"), key=f"{key_prefix}_dep")
+                filtro_ran = o3.selectbox("Rango:", _opciones_filtro(df_p, "RANGO"), key=f"{key_prefix}_ran")
+                filtro_tur = o4.selectbox("Turno:", _opciones_filtro(df_p, "TURNO"), key=f"{key_prefix}_tur")
+                filtro_grp = o5.selectbox("Grupo:", _opciones_filtro(df_p, "GRUPO"), key=f"{key_prefix}_grp")
 
-                centros_disp = ["TODOS"] + sorted([x for x in df_p["ASIGNADO_CENTRO"].unique() if str(x).strip() != ""])
-                filtro_cen = f3.selectbox("Centro:", centros_disp, key=f"{key_prefix}_cen")
+                # Desplegable: Filtros avanzados + selección de columnas para exportar solo la consulta
+                with st.expander("🎛️ Filtros Avanzados y Columnas de Descarga (Opcional)", expanded=False):
+                    av1, av2, av3, av4, av5 = st.columns(5)
+                    filtro_apto = av1.selectbox("Condición Médica:", _opciones_filtro(df_p, "APTO_NO_APTO"), key=f"{key_prefix}_apto")
+                    filtro_gen = av2.selectbox("Género:", _opciones_filtro(df_p, "GENERO"), key=f"{key_prefix}_gen")
+                    filtro_prov = av3.selectbox("Provincia:", _opciones_filtro(df_p, "PROVINCIA"), key=f"{key_prefix}_prov")
+                    filtro_pens = av4.selectbox("Pensionado:", _opciones_filtro(df_p, "PENSIONADO"), key=f"{key_prefix}_pens")
+                    filtro_min_anios = av5.number_input(
+                        "Años Servicio (mín.):",
+                        min_value=0,
+                        max_value=50,
+                        value=0,
+                        step=1,
+                        help="Deja en 0 para ver todos. Ej.: 25 para listar unidades próximas a jubilación.",
+                        key=f"{key_prefix}_min_anios",
+                    )
 
-                status_disp = ["TODOS"] + sorted([x for x in df_p["ESTADO_STATUS"].unique() if str(x).strip() != ""])
-                filtro_sta = f4.selectbox("Estado / Status:", status_disp, key=f"{key_prefix}_sta")
+                    modo_cols = st.radio(
+                        "📋 Columnas a incluir en la tabla y en la descarga Excel de esta consulta:",
+                        [
+                            "Todas las columnas (60)",
+                            "Resumen Ejecutivo (14 columnas clave)",
+                            "Elegir columnas manualmente",
+                        ],
+                        horizontal=True,
+                        key=f"{key_prefix}_modo_cols",
+                    )
+                    cols_disponibles = list(df_p.columns)
+                    cols_resumen_disp = [c for c in COLS_RESUMEN_EJECUTIVO if c in cols_disponibles]
+                    if modo_cols == "Resumen Ejecutivo (14 columnas clave)":
+                        cols_export = cols_resumen_disp or cols_disponibles
+                    elif modo_cols == "Elegir columnas manualmente":
+                        cols_export = st.multiselect(
+                            "Selecciona las columnas exactas a mostrar y descargar:",
+                            options=cols_disponibles,
+                            default=cols_resumen_disp or cols_disponibles[:10],
+                            key=f"{key_prefix}_cols_custom",
+                        )
+                        if not cols_export:
+                            cols_export = cols_disponibles
+                    else:
+                        cols_export = cols_disponibles
 
+                # Aplicación de todos los filtros sobre una copia (solo se exporta lo filtrado)
                 df_filtrado = df_p.copy()
                 if busqueda:
                     mask_b = (
@@ -2297,27 +2357,47 @@ else:
                         | df_filtrado["POSIC"].str.upper().str.contains(busqueda, na=False)
                     )
                     df_filtrado = df_filtrado[mask_b]
-                if filtro_est != "TODOS":
-                    df_filtrado = df_filtrado[df_filtrado["ESTAMENTO"] == filtro_est]
-                if filtro_cen != "TODOS":
-                    df_filtrado = df_filtrado[df_filtrado["ASIGNADO_CENTRO"] == filtro_cen]
-                if filtro_sta != "TODOS":
-                    df_filtrado = df_filtrado[df_filtrado["ESTADO_STATUS"] == filtro_sta]
 
-                c_info, c_dl = st.columns([4, 1])
+                filtros_exactos = [
+                    ("ESTAMENTO", filtro_est),
+                    ("ASIGNADO_CENTRO", filtro_cen),
+                    ("ESTADO_STATUS", filtro_sta),
+                    ("OPERAT_NO_OPERAT", filtro_op),
+                    ("DEPARTAMENTO", filtro_dep),
+                    ("RANGO", filtro_ran),
+                    ("TURNO", filtro_tur),
+                    ("GRUPO", filtro_grp),
+                    ("APTO_NO_APTO", filtro_apto),
+                    ("GENERO", filtro_gen),
+                    ("PROVINCIA", filtro_prov),
+                    ("PENSIONADO", filtro_pens),
+                ]
+                for col_f, val_f in filtros_exactos:
+                    if val_f != "TODOS" and col_f in df_filtrado.columns:
+                        df_filtrado = df_filtrado[df_filtrado[col_f].astype(str).str.strip() == val_f]
+
+                if filtro_min_anios > 0 and "ANOS_SERVICIOS" in df_filtrado.columns:
+                    anios_num = pd.to_numeric(df_filtrado["ANOS_SERVICIOS"], errors="coerce")
+                    df_filtrado = df_filtrado[anios_num >= filtro_min_anios]
+
+                df_exportar = df_filtrado[cols_export]
+
+                c_info, c_dl = st.columns([3.5, 1.5])
                 c_info.markdown(
-                    f"**Pestaña:** `{nombre_hoja}` · **Mostrando:** `{len(df_filtrado)}` de `{len(df_p)}` registros completos (60 columnas)"
+                    f"**Pestaña:** `{nombre_hoja}` · **Consulta filtrada:** `{len(df_filtrado)}` de `{len(df_p)}` registros · "
+                    f"**Columnas:** `{len(cols_export)}`"
                 )
                 c_dl.download_button(
-                    label="📥 Descargar Excel",
-                    data=convertir_df_a_excel(df_filtrado, nombre_hoja),
-                    file_name=f"{nombre_hoja}.xlsx",
+                    label=f"📥 Descargar Consulta ({len(df_exportar)} reg.)",
+                    data=convertir_df_a_excel(df_exportar, nombre_hoja),
+                    file_name=f"Consulta_{nombre_hoja}_{hoy_pa.strftime('%Y%m%d')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
+                    disabled=df_exportar.empty,
                     key=f"{key_prefix}_dl",
                 )
 
-                st.dataframe(df_filtrado, use_container_width=True, height=440)
+                st.dataframe(df_exportar, use_container_width=True, height=440)
 
                 if busqueda != "":
                     st.markdown("<hr style='border:1px dashed #00d4ff;'>", unsafe_allow_html=True)
@@ -2530,14 +2610,27 @@ else:
                     key="nov_busq",
                 ).strip().upper()
 
-                tipos_disp = ["TODOS"] + sorted([x for x in df_nov["TIPO_NOVEDAD"].unique() if str(x).strip() != ""])
+                tipos_disp = ["TODOS"] + sorted([str(x).strip() for x in df_nov["TIPO_NOVEDAD"].unique() if str(x).strip() != ""])
                 filtro_tipo_nov = fn2.selectbox("Tipo de Novedad:", tipos_disp, key="nov_tipo_f")
 
-                cen_nov_disp = ["TODOS"] + sorted([x for x in df_nov["ASIGNADO_CENTRO"].unique() if str(x).strip() != ""])
+                cen_nov_disp = ["TODOS"] + sorted([str(x).strip() for x in df_nov["ASIGNADO_CENTRO"].unique() if str(x).strip() != ""])
                 filtro_cen_nov = fn3.selectbox("Centro:", cen_nov_disp, key="nov_cen_f")
 
-                est_nov_disp = ["TODOS"] + sorted([x for x in df_nov["ESTADO_TRAMITE"].unique() if str(x).strip() != ""])
+                est_nov_disp = ["TODOS"] + sorted([str(x).strip() for x in df_nov["ESTADO_TRAMITE"].unique() if str(x).strip() != ""])
                 filtro_est_nov = fn4.selectbox("Estado Trámite:", est_nov_disp, key="nov_est_f")
+
+                fn5, fn6 = st.columns(2)
+                imp_nov_disp = (
+                    ["TODOS"] + sorted([str(x).strip() for x in df_nov["IMPACTO_OPERATIVO"].unique() if str(x).strip() != ""])
+                    if "IMPACTO_OPERATIVO" in df_nov.columns
+                    else ["TODOS"]
+                )
+                filtro_imp_nov = fn5.selectbox("Impacto Operativo:", imp_nov_disp, key="nov_imp_f")
+                filtro_alerta_nov = fn6.selectbox(
+                    "Alerta de Reintegro:",
+                    ["TODOS", "VENCIDO", "PRÓXIMO A REINCORPORAR", "EN CURSO", "REINCORPORADO", "ANULADO"],
+                    key="nov_alerta_f",
+                )
 
                 df_nov_filt = df_nov.copy()
                 if busq_nov:
@@ -2550,22 +2643,29 @@ else:
                     )
                     df_nov_filt = df_nov_filt[mask_n]
                 if filtro_tipo_nov != "TODOS":
-                    df_nov_filt = df_nov_filt[df_nov_filt["TIPO_NOVEDAD"] == filtro_tipo_nov]
+                    df_nov_filt = df_nov_filt[df_nov_filt["TIPO_NOVEDAD"].astype(str).str.strip() == filtro_tipo_nov]
                 if filtro_cen_nov != "TODOS":
-                    df_nov_filt = df_nov_filt[df_nov_filt["ASIGNADO_CENTRO"] == filtro_cen_nov]
+                    df_nov_filt = df_nov_filt[df_nov_filt["ASIGNADO_CENTRO"].astype(str).str.strip() == filtro_cen_nov]
                 if filtro_est_nov != "TODOS":
-                    df_nov_filt = df_nov_filt[df_nov_filt["ESTADO_TRAMITE"] == filtro_est_nov]
+                    df_nov_filt = df_nov_filt[df_nov_filt["ESTADO_TRAMITE"].astype(str).str.strip() == filtro_est_nov]
+                if filtro_imp_nov != "TODOS" and "IMPACTO_OPERATIVO" in df_nov_filt.columns:
+                    df_nov_filt = df_nov_filt[df_nov_filt["IMPACTO_OPERATIVO"].astype(str).str.strip() == filtro_imp_nov]
+                if filtro_alerta_nov != "TODOS" and "ALERTA_REINTEGRO" in df_nov_filt.columns:
+                    df_nov_filt = df_nov_filt[
+                        df_nov_filt["ALERTA_REINTEGRO"].astype(str).str.upper().str.contains(filtro_alerta_nov, na=False)
+                    ]
 
-                cn_info, cn_dl = st.columns([4, 1])
+                cn_info, cn_dl = st.columns([3.5, 1.5])
                 cn_info.markdown(
-                    f"**Pestaña:** `{PESTANA_NOVEDADES}` · **Mostrando:** `{len(df_nov_filt)}` de `{len(df_nov)}` registros (27 columnas)"
+                    f"**Pestaña:** `{PESTANA_NOVEDADES}` · **Consulta filtrada:** `{len(df_nov_filt)}` de `{len(df_nov)}` registros (27 columnas)"
                 )
                 cn_dl.download_button(
-                    label="📥 Descargar Excel",
+                    label=f"📥 Descargar Consulta ({len(df_nov_filt)} reg.)",
                     data=convertir_df_a_excel(df_nov_filt, "Permisos_Incapacidades"),
-                    file_name="Permiso_incapacidad_licencia.xlsx",
+                    file_name=f"Consulta_Permisos_Incapacidades_{hoy_pa.strftime('%Y%m%d')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
+                    disabled=df_nov_filt.empty,
                     key="nov_dl",
                 )
 
