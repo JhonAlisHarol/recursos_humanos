@@ -2304,7 +2304,7 @@ else:
                 filtro_tur = o4.selectbox("Turno:", _opciones_filtro(df_p, "TURNO"), key=f"{key_prefix}_tur")
                 filtro_grp = o5.selectbox("Grupo:", _opciones_filtro(df_p, "GRUPO"), key=f"{key_prefix}_grp")
 
-                # Desplegable: Filtros avanzados + selección de columnas para exportar solo la consulta
+                # Desplegable: Filtros avanzados (cualquiera de las 60 columnas) + columnas de descarga
                 with st.expander("🎛️ Filtros Avanzados y Columnas de Descarga (Opcional)", expanded=False):
                     av1, av2, av3, av4, av5 = st.columns(5)
                     filtro_apto = av1.selectbox("Condición Médica:", _opciones_filtro(df_p, "APTO_NO_APTO"), key=f"{key_prefix}_apto")
@@ -2321,6 +2321,52 @@ else:
                         key=f"{key_prefix}_min_anios",
                     )
 
+                    st.markdown("<hr style='border:1px dashed #00d4ff; margin: 10px 0;'>", unsafe_allow_html=True)
+
+                    # Selector dinámico para filtrar por cualquiera de las demás columnas de las 60
+                    cols_ya_arriba = {
+                        "ESTAMENTO", "ASIGNADO_CENTRO", "ESTADO_STATUS",
+                        "OPERAT_NO_OPERAT", "DEPARTAMENTO", "RANGO", "TURNO", "GRUPO",
+                        "APTO_NO_APTO", "GENERO", "PROVINCIA", "PENSIONADO",
+                    }
+                    cols_extra_disp = [c for c in df_p.columns if c not in cols_ya_arriba]
+                    cols_extra_sel = st.multiselect(
+                        "🔍 Filtros adicionales (elige cualquiera de las demás columnas de las 60):",
+                        options=cols_extra_disp,
+                        default=[],
+                        placeholder="Clic para agregar filtros (ej.: TIPO_SANGRE, TALLA_BOTAS, DISTRITO, EDAD, FUNCION...)",
+                        key=f"{key_prefix}_cols_extra_sel",
+                    )
+
+                    filtros_extra_activos = {}
+                    if cols_extra_sel:
+                        grid_ex = st.columns(3)
+                        for idx_ex, col_ex in enumerate(cols_extra_sel):
+                            serie_ex = df_p[col_ex].fillna("").astype(str).str.strip()
+                            vals_unicos = sorted([v for v in serie_ex.unique() if v != ""])
+                            tiene_vacios = bool((serie_ex == "").any())
+                            with grid_ex[idx_ex % 3]:
+                                if len(vals_unicos) <= 50:
+                                    opciones_ex = (["(VACÍO)"] if tiene_vacios else []) + vals_unicos
+                                    sel_ex = st.multiselect(
+                                        f"Filtrar {col_ex}:",
+                                        options=opciones_ex,
+                                        default=[],
+                                        placeholder="Todos...",
+                                        key=f"{key_prefix}_fextra_ms_{col_ex}",
+                                    )
+                                    if sel_ex:
+                                        filtros_extra_activos[col_ex] = ("multiselect", sel_ex)
+                                else:
+                                    txt_ex = st.text_input(
+                                        f"Filtrar {col_ex} (texto o VACIO):",
+                                        key=f"{key_prefix}_fextra_txt_{col_ex}",
+                                    ).strip().upper()
+                                    if txt_ex:
+                                        filtros_extra_activos[col_ex] = ("text", txt_ex)
+
+                    st.markdown("<hr style='border:1px dashed #00d4ff; margin: 10px 0;'>", unsafe_allow_html=True)
+
                     modo_cols = st.radio(
                         "📋 Columnas a incluir en la tabla y en la descarga Excel de esta consulta:",
                         [
@@ -2334,12 +2380,12 @@ else:
                     cols_disponibles = list(df_p.columns)
                     cols_resumen_disp = [c for c in COLS_RESUMEN_EJECUTIVO if c in cols_disponibles]
                     if modo_cols == "Resumen Ejecutivo (14 columnas clave)":
-                        cols_export = cols_resumen_disp or cols_disponibles
+                        cols_export = list(dict.fromkeys((cols_resumen_disp or cols_disponibles) + cols_extra_sel))
                     elif modo_cols == "Elegir columnas manualmente":
                         cols_export = st.multiselect(
                             "Selecciona las columnas exactas a mostrar y descargar:",
                             options=cols_disponibles,
-                            default=cols_resumen_disp or cols_disponibles[:10],
+                            default=list(dict.fromkeys((cols_resumen_disp or cols_disponibles[:10]) + cols_extra_sel)),
                             key=f"{key_prefix}_cols_custom",
                         )
                         if not cols_export:
@@ -2379,6 +2425,23 @@ else:
                 if filtro_min_anios > 0 and "ANOS_SERVICIOS" in df_filtrado.columns:
                     anios_num = pd.to_numeric(df_filtrado["ANOS_SERVICIOS"], errors="coerce")
                     df_filtrado = df_filtrado[anios_num >= filtro_min_anios]
+
+                for col_ex, (tipo_f, val_f) in filtros_extra_activos.items():
+                    if col_ex not in df_filtrado.columns:
+                        continue
+                    serie_f = df_filtrado[col_ex].fillna("").astype(str).str.strip()
+                    if tipo_f == "multiselect":
+                        incluir_vacios = "(VACÍO)" in val_f
+                        valores_reales = [v for v in val_f if v != "(VACÍO)"]
+                        mask_ex = serie_f.isin(valores_reales)
+                        if incluir_vacios:
+                            mask_ex = mask_ex | (serie_f == "")
+                        df_filtrado = df_filtrado[mask_ex]
+                    else:
+                        if val_f in ("VACIO", "VACÍO", "(VACÍO)"):
+                            df_filtrado = df_filtrado[serie_f == ""]
+                        else:
+                            df_filtrado = df_filtrado[serie_f.str.upper().str.contains(val_f, na=False, regex=False)]
 
                 df_exportar = df_filtrado[cols_export]
 
