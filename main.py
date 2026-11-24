@@ -1427,6 +1427,7 @@ def pantalla_login():
             "ALISJHON": "199432",
             "ALBERTO AYALA": "24561",
             "DANILO SMITH": "49431",
+            "VICTOR MARTINEZ": "8-846-1381",
         }
 
         with st.form("login_form"):
